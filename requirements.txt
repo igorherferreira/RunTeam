@@ -13,3 +13,4 @@ python-jose
 passlib
 firebase-admin
 psycopg2-binary
+psycopg[binary]
