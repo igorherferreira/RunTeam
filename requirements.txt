@@ -1,0 +1,15 @@
+fastapi
+uvicorn[standard]
+sqlalchemy>=2.0
+pydantic[email]
+python-multipart
+pyjwt
+bcrypt
+uvicorn
+sqlalchemy
+jinja2
+pillow
+python-jose
+passlib
+firebase-admin
+psycopg2-binary

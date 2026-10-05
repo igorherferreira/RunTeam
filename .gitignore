@@ -1,0 +1,14 @@
+atletas.db
+atletas_quebrado.db
+atletas_novo.db
+*.db
+*.rar
+uploads/
+.env
+.env.*
+.venv/
+venv/
+__pycache__/
+*.pyc
+.idea/
+reparar_atletas_db.py
