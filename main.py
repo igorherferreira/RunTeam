@@ -276,6 +276,49 @@ def feed(cidade: str | None = None, limite: int = 20, db: Session = Depends(get_
     return itens
 
 
+
+# ---------- Excluir publicação ----------
+@app.delete("/corridas/{corrida_id}")
+def excluir_publicacao(
+    corrida_id: int,
+    u: Usuario = Depends(usuario_atual),
+    db: Session = Depends(get_db),
+):
+    corrida = db.get(Corrida, corrida_id)
+
+    if not corrida:
+        raise HTTPException(404, "Publicação não encontrada")
+
+    # O proprietário ou um administrador pode excluir.
+    if corrida.usuario_id != u.id and not u.is_admin:
+        raise HTTPException(
+            403,
+            "Você não tem permissão para excluir esta publicação"
+        )
+
+    # Localiza as fotos associadas à publicação.
+    fotos = db.scalars(
+        select(Foto).where(Foto.corrida_id == corrida_id)
+    ).all()
+
+    # Remove curtidas e fotos do banco.
+    db.execute(
+        delete(Curtida).where(Curtida.corrida_id == corrida_id)
+    )
+
+    for foto in fotos:
+        db.delete(foto)
+
+    # Remove a publicação.
+    db.delete(corrida)
+    db.commit()
+
+    return {
+        "ok": True,
+        "mensagem": "Publicação excluída com sucesso"
+    }
+
+
 # ---------- Ranking ----------
 @app.get("/ranking")
 def ranking(distancia_km: float = 10, cidade: str | None = None,
