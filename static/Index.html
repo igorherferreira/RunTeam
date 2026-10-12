@@ -2,6 +2,11 @@
 <html lang="pt-BR" class="dark">
 <head>
 <meta charset="UTF-8">
+<script>
+/* Dentro do APK a página abre de https://localhost; o <base> redireciona as chamadas para o servidor escolhido */
+window.RT_APP=!!window.Capacitor||(location.protocol==='https:'&&location.hostname==='localhost'&&!location.port);
+try{var a=localStorage.getItem('rt_api');if(window.RT_APP&&a)document.write('<base href="'+a.replace(/"/g,'')+'/">')}catch(e){}
+</script>
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <meta name="theme-color" content="#060a13">
 <title>RunTeam - Corra. Compita. Conecte-se.</title>
@@ -16,6 +21,14 @@ body{font-family:'Poppins',sans-serif;background:radial-gradient(circle at 80% -
 .card{background:#0d1525;border:1px solid #1b2740;border-radius:20px}
 .btn{background:linear-gradient(90deg,#ff6a13,#ff8f3a);border-radius:14px;font-weight:600;box-shadow:0 6px 20px rgba(255,106,19,.3)}
 .logo{font-style:italic;font-weight:800;letter-spacing:-.03em}
+/* Respeita a barra de status e a barra de gestos do Android/iPhone (no navegador comum o valor é 0) */
+:root{--sat:max(env(safe-area-inset-top,0px),var(--safe-area-inset-top,0px));--sab:max(env(safe-area-inset-bottom,0px),var(--safe-area-inset-bottom,0px))}
+#app>header{padding-top:calc(.75rem + var(--sat))}
+#recbar{top:calc(57px + var(--sat))}
+#mnav{padding-bottom:calc(.75rem + var(--sab))}
+#fab{bottom:calc(6rem + var(--sab))}
+@media(min-width:768px){#fab{bottom:1.5rem}}
+#auth,#modal{padding-top:max(1rem,var(--sat));padding-bottom:max(1rem,var(--sab))}
 /* Fundo do login: corredores ao pôr do sol por trás do card */
 #auth{isolation:isolate;overflow:hidden}
 #auth::before{content:"";position:absolute;inset:0;z-index:-2;background:var(--fundo-login) 72% 0/230% auto no-repeat;opacity:.75;-webkit-mask-image:linear-gradient(to bottom,#000 25%,transparent 58%);mask-image:linear-gradient(to bottom,#000 25%,transparent 58%)}
@@ -43,7 +56,7 @@ input:-webkit-autofill{-webkit-box-shadow:0 0 0 40px #0a1120 inset;-webkit-text-
   <button id="recbar" onclick="go('gravar')" class="hidden w-full bg-brand text-white text-xs font-semibold py-1.5 sticky top-[57px] z-30"></button>
   <main id="view" class="max-w-2xl mx-auto p-4 space-y-3 pb-28"></main>
 
-  <button onclick="escolher()" aria-label="Registrar corrida" class="btn fixed right-4 bottom-24 md:bottom-6 z-40 w-14 h-14 rounded-full text-xl"><i class="fa-solid fa-plus"></i></button>
+  <button id="fab" onclick="escolher()" aria-label="Registrar corrida" class="btn fixed right-4 bottom-24 md:bottom-6 z-40 w-14 h-14 rounded-full text-xl"><i class="fa-solid fa-plus"></i></button>
   <div id="mnav" class="md:hidden fixed bottom-0 inset-x-0 z-40 bg-ink/95 backdrop-blur-xl border-t border-line px-1 pt-2 pb-3 flex justify-around"></div>
 </div>
 
@@ -66,9 +79,10 @@ const empty=t=>`<p class="text-center text-sm text-gray-500 py-16">${t}</p>`;
 const head=(t,btn)=>`<div class="flex items-center justify-between"><h2 class="text-lg font-bold">${t}</h2>${btn||''}</div>`;
 const pill=(on,t,fn)=>`<button onclick="${fn}" class="px-4 py-1.5 rounded-full text-xs font-semibold whitespace-nowrap ${on?'bg-brand text-white':'bg-card border border-line text-gray-400'}">${t}</button>`;
 const bar=(v,m)=>`<div class="h-2 bg-[#14203a] rounded-full overflow-hidden"><div class="h-full rounded-full bg-gradient-to-r from-brand to-brand2" style="width:${Math.min(100,v/m*100)}%"></div></div>`;
+const SITE=(RT_APP&&localStorage.getItem('rt_api'))||location.origin;
 const NIVEL={iniciante:'Iniciante',intermediario:'Intermediário',avancado:'Avançado'};
 const TABS=[['home','Início','fa-house'],['explorar','Explorar','fa-compass'],['grupos','Corridas','fa-person-running'],['ranking','Ranking','fa-trophy'],['perfil','Perfil','fa-user']];
-let token=localStorage.getItem('t'),me=null,cur='home',rk={d:10,c:'',g:false},fc=false;
+let token=localStorage.getItem('t'),me=null,cur='home',rk={d:10,c:'',g:false},fc='todos';
 
 async function api(path,o={}){
   const h={...(o.headers||{})};
@@ -90,7 +104,7 @@ function modal(title,body,onOk,btn='Salvar'){
 
 function showAuth(m='login'){
   const c=m==='cad';
-  $('#auth').innerHTML=`<div class="card auth-card p-6 w-full max-w-sm space-y-4"><div class="text-center"><i class="fa-solid fa-person-running text-brand text-4xl"></i><h1 class="logo text-4xl mt-1">Run<span class="text-brand">Team</span></h1><p class="text-[10px] text-gray-400 tracking-[.2em] uppercase mt-1">Corra · Compita · Conecte-se</p></div><form id="af" class="space-y-3">${c?F('nome','Nome','required minlength="2"'):''}${F('email','E-mail','type="email" required')}${F('senha','Senha','type="password" required minlength="6"')}${c?F('cidade','Cidade','required'):''}<button class="btn w-full py-2.5 text-sm">${c?'Criar conta':'Entrar'}</button></form><button onclick="showAuth('${c?'login':'cad'}')" class="w-full text-xs text-gray-400 hover:text-brand">${c?'Já tenho conta':'Criar conta'}</button></div>`;
+  $('#auth').innerHTML=`<div class="card auth-card p-6 w-full max-w-sm space-y-4"><div class="text-center"><i class="fa-solid fa-person-running text-brand text-4xl"></i><h1 class="logo text-4xl mt-1">Run<span class="text-brand">Team</span></h1><p class="text-[10px] text-gray-400 tracking-[.2em] uppercase mt-1">Corra · Compita · Conecte-se</p></div><form id="af" class="space-y-3">${c?F('nome','Nome','required minlength="2"'):''}${F('email','E-mail','type="email" required')}${F('senha','Senha','type="password" required minlength="6"')}${c?F('cidade','Cidade','required'):''}<button class="btn w-full py-2.5 text-sm">${c?'Criar conta':'Entrar'}</button></form><button onclick="showAuth('${c?'login':'cad'}')" class="w-full text-xs text-gray-400 hover:text-brand">${c?'Já tenho conta':'Criar conta'}</button>${RT_APP?`<button onclick="showServidor()" class="w-full text-[11px] text-gray-600">Servidor: ${esc((localStorage.getItem('rt_api')||'').replace(/^https?:\/\//,''))} · alterar</button>`:''}</div>`;
   $('#auth').classList.remove('hidden');
   $('#af').onsubmit=async e=>{e.preventDefault();const d=Object.fromEntries(new FormData(e.target));try{if(c)await api('/auth/cadastro',{method:'POST',json:d});await entrar(d.email,d.senha)}catch(x){toast(x.message)}};
 }
@@ -102,6 +116,7 @@ function logout(){parar();G=G0();localStorage.removeItem('rt_gps');localStorage.
 const refreshMe=async()=>{me=await api('/usuarios/me');setWho()};
 function setWho(){$('#who').innerHTML=av(me.nome,me.foto_perfil,'w-9 h-9 text-xs');$('#adminBtn').classList.toggle('hidden',!me.is_admin)}
 async function boot(){
+  if(RT_APP&&!localStorage.getItem('rt_api')){showServidor();return}
   if(!token){showAuth();return}
   try{me=await api('/usuarios/me')}catch{logout();return}
   if(!me)return;
@@ -118,24 +133,24 @@ async function go(t){cur=t;nav();upd();$('#view').innerHTML=empty('Carregando...
 const ring=(km,meta=10)=>{const r=88,c=2*Math.PI*r,p=Math.min(1,km/meta);return `<div class="relative w-52 h-52 mx-auto"><svg viewBox="0 0 200 200" class="w-full h-full -rotate-90"><defs><linearGradient id="rg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#1e90ff"/><stop offset="1" stop-color="#19d3c5"/></linearGradient></defs><circle cx="100" cy="100" r="${r}" fill="none" stroke="#14203a" stroke-width="10"/><circle cx="100" cy="100" r="${r}" fill="none" stroke="url(#rg)" stroke-width="10" stroke-linecap="round" stroke-dasharray="${c*p} ${c}"/></svg><div class="absolute inset-0 flex flex-col items-center justify-center"><i class="fa-solid fa-person-running text-brand text-xl mb-1"></i><p class="text-4xl font-bold">${kmf(km,2)}<span class="text-lg font-medium"> km</span></p><p class="text-xs text-gray-400">Distância</p></div></div>`};
 
 async function home(){
-  const [it,ads]=await Promise.all([api('/feed'+(fc?'?cidade='+encodeURIComponent(me.cidade):'')),getAds()]);
+  const [it,ads]=await Promise.all([api('/feed'+(fc==='cid'?'?cidade='+encodeURIComponent(me.cidade):fc==='seg'?'?seguindo=true':'')),getAds()]);
   const m=it.find(c=>c.usuario_id===me.id);
   $('#view').innerHTML=`<section class="card p-5"><p class="text-xs text-gray-400 text-center mb-3">${m?'Sua última corrida':'Registre sua primeira corrida'}</p>${ring(m?m.distancia_km:0)}
   <div class="grid grid-cols-3 mt-5">${st('Tempo',m?fmt(m.tempo_seg):'--')}${st('Pace (min/km)',m?fmt(m.pace_seg_km):'--')}${st('Km total',kmf(me.km_total))}</div>
   <button onclick="go('gravar')" class="btn w-full py-3 mt-5 text-sm"><i class="fa-solid fa-satellite-dish"></i> Iniciar corrida com GPS</button><button onclick="novaCorrida()" class="w-full mt-2 py-2 text-xs text-gray-400">Registrar manualmente</button></section>
-  <div class="flex gap-2 pt-2">${pill(!fc,'Todos','fc=false;home()')}${pill(fc,'Minha cidade','fc=true;home()')}</div>`
+  <div class="flex gap-2 pt-2">${pill(fc==='todos','Todos',"fc='todos';home()")}${pill(fc==='seg','Seguindo',"fc='seg';home()")}${pill(fc==='cid','Minha cidade',"fc='cid';home()")}</div>`
   +(it.length?it.map((c,i)=>`<article class="card p-4 space-y-3">
     <button onclick="perfil(${c.usuario_id})" class="flex items-center gap-3 text-left w-full">${av(c.atleta,c.atleta_foto,'w-11 h-11')}<div><p class="font-semibold text-sm">${esc(c.atleta)}</p><p class="text-[11px] text-gray-400">${quando(c.data)} · Corrida</p></div></button>
     ${c.legenda?`<p class="text-sm">${esc(c.legenda)}</p>`:''}
     ${c.fotos.map(f=>`<img src="${esc(f)}" alt="Foto da corrida" class="w-full rounded-2xl max-h-80 object-cover">`).join('')}
     ${c.trajeto&&c.trajeto.length>1?`<div class="rounded-2xl bg-[#0a1120] p-2">${rota(c.trajeto,120)}</div>`:''}<div class="flex flex-wrap gap-2 text-xs"><span class="bg-[#14203a] rounded-full px-3 py-1"><i class="fa-solid fa-route text-brand"></i> ${kmf(c.distancia_km)} km</span><span class="bg-[#14203a] rounded-full px-3 py-1"><i class="fa-regular fa-clock text-brand"></i> ${fmt(c.tempo_seg)}</span><span class="bg-[#14203a] rounded-full px-3 py-1"><i class="fa-solid fa-gauge-high text-brand"></i> ${fmt(c.pace_seg_km)}/km</span>${c.origem==='gps'?'<span class="bg-[#14203a] rounded-full px-3 py-1"><i class="fa-solid fa-satellite-dish text-brand"></i> GPS</span>':''}</div>
-    <div class="flex justify-between text-gray-400 text-sm"><button onclick="curtir(${c.id},this)"><i class="fa-regular fa-heart"></i> <span>${c.curtidas}</span></button>${adminDel('corridas',c.id)}<button aria-label="Compartilhar" data-t="${esc(c.atleta)} correu ${kmf(c.distancia_km)} km em ${fmt(c.tempo_seg)} no RunTeam!" onclick="compartilhar(this.dataset.t)"><i class="fa-solid fa-share-nodes"></i></button></div></article>${i%4===1&&ads.length?adCard(ads[Math.floor(i/4)%ads.length]):''}`).join(''):empty('Nenhuma corrida ainda. Seja o primeiro!'));contaAds();
+    <div class="flex justify-between text-gray-400 text-sm"><button onclick="curtir(${c.id},this)"><i class="fa-regular fa-heart"></i> <span>${c.curtidas}</span></button>${adminDel('corridas',c.id)}<button aria-label="Compartilhar" data-t="${esc(c.atleta)} correu ${kmf(c.distancia_km)} km em ${fmt(c.tempo_seg)} no RunTeam!" onclick="compartilhar(this.dataset.t)"><i class="fa-solid fa-share-nodes"></i></button></div></article>${i%4===1&&ads.length?adCard(ads[Math.floor(i/4)%ads.length]):''}`).join(''):empty(fc==='seg'?'Siga atletas (toque no nome deles) para ver as corridas aqui.':'Nenhuma corrida ainda. Seja o primeiro!'));contaAds();
 }
 async function curtir(id,b){
   try{const r=await api(`/corridas/${id}/curtir`,{method:'POST'}),s=b.querySelector('span');
   s.textContent=+s.textContent+(r.curtiu?1:-1);b.classList.toggle('text-red-500',r.curtiu);b.querySelector('i').className=(r.curtiu?'fa-solid':'fa-regular')+' fa-heart'}catch(e){toast(e.message)}
 }
-function compartilhar(t){navigator.share?navigator.share({title:'RunTeam',text:t,url:location.origin}).catch(()=>{}):navigator.clipboard?.writeText(t+' '+location.origin).then(()=>toast('Texto copiado!'))}
+function compartilhar(t){navigator.share?navigator.share({title:'RunTeam',text:t,url:SITE}).catch(()=>{}):navigator.clipboard?.writeText(t+' '+SITE).then(()=>toast('Texto copiado!'))}
 function novaCorrida(){
   modal('Registrar corrida',F('d','Distância (km)','type="number" step="0.01" min="0.1" required')+F('t','Tempo (mm:ss ou h:mm:ss)','placeholder="52:14" required')+F('l','Legenda','placeholder="Mais um treino concluído!"')+F('f','Foto','type="file" accept="image/*"'),async fd=>{
     const t=parseT(fd.get('t'));if(!t)throw new Error('Tempo inválido. Use o formato 52:14');
@@ -168,8 +183,8 @@ function novaTurma(){
 }
 
 async function explorar(){
-  const [it,ads]=await Promise.all([api('/campeonatos?cidade='+encodeURIComponent(me.cidade)),getAds()]);
-  $('#view').innerHTML=head('Explorar',`<button onclick="novoEvento()" class="btn text-xs px-4 py-2"><i class="fa-solid fa-plus"></i> Divulgar</button>`)+`<p class="text-xs text-gray-400">Campeonatos e provas em ${esc(me.cidade)}</p>${ads[0]?adCard(ads[0]):''}`
+  const [it,ads,ds]=await Promise.all([api('/campeonatos?cidade='+encodeURIComponent(me.cidade)),getAds(),api('/desafios')]);
+  $('#view').innerHTML=head('Explorar',`<button onclick="novoEvento()" class="btn text-xs px-4 py-2"><i class="fa-solid fa-plus"></i> Divulgar</button>`)+`${ds.length?`<h3 class="font-bold text-sm pt-1">Desafios</h3>${ds.map(desafioCard).join('')}`:''}${ads[0]?adCard(ads[0]):''}<h3 class="font-bold text-sm pt-1">Campeonatos em ${esc(me.cidade)}</h3>`
   +(it.length?it.map(c=>`<div class="card p-4 flex items-center gap-3"><div class="w-14 h-14 rounded-2xl bg-brand/15 flex flex-col items-center justify-center"><span class="font-bold text-lg text-brand leading-none">${c.data.slice(8,10)}</span><span class="text-[10px] text-gray-400 uppercase">${new Date(c.data+'T12:00').toLocaleString('pt-BR',{month:'short'})}</span></div><div class="flex-1"><p class="font-semibold text-sm">${esc(c.nome)}</p><p class="text-[11px] text-gray-400">${esc(c.cidade)}</p></div>${adminDel('campeonatos',c.id)}${c.link&&/^https?:\/\//.test(c.link)?`<a href="${esc(c.link)}" target="_blank" rel="noopener" class="text-xs text-brand font-semibold">Inscrição <i class="fa-solid fa-arrow-up-right-from-square"></i></a>`:''}</div>`).join(''):empty('Nenhum campeonato divulgado na sua cidade.'));contaAds();
 }
 function novoEvento(){
@@ -185,16 +200,20 @@ async function fotoPerfil(f){
   try{const r=await api('/usuarios/me/foto',{method:'POST',body:b});me.foto_perfil=r.url;setWho();perfil()}catch(e){toast(e.message)}
 }
 async function perfil(id){
-  id=id||me.id;const u=await api('/usuarios/'+id),own=id===me.id;
-  const nv=Math.floor(u.km_total/50)+1,conq=[['Primeira corrida','fa-shoe-prints',u.total_corridas>=1],['10 corridas','fa-fire',u.total_corridas>=10],['50 km','fa-road',u.km_total>=50],['100 km','fa-medal',u.km_total>=100],['Fotógrafo','fa-camera',u.fotos.length>=1]];
-  $('#view').innerHTML=`<section class="card p-5 space-y-5"><div class="flex items-center gap-4">${own?`<label class="relative cursor-pointer" title="Trocar foto de perfil">${av(u.nome,u.foto_perfil,'w-20 h-20 text-2xl')}<span class="absolute -bottom-1 -right-1 w-7 h-7 rounded-full bg-brand flex items-center justify-center text-xs"><i class="fa-solid fa-camera"></i></span><input type="file" accept="image/*" class="hidden" onchange="fotoPerfil(this.files[0])"></label>`:av(u.nome,u.foto_perfil,'w-20 h-20 text-2xl')}<div><h2 class="text-lg font-bold">${esc(u.nome)}</h2><p class="text-xs text-gray-400">${esc(u.esporte)} · ${esc(u.cidade)}</p></div></div>
+  id=id||me.id;const u=await api('/usuarios/'+id),own=id===me.id,sig=(me.seguindo_ids||[]).includes(id);
+  const nv=Math.floor(u.km_total/50)+1,mx=Math.max(1,...u.semana.map(x=>x.km)),
+  conq=[['Primeira corrida','fa-shoe-prints',u.total_corridas>=1],['10 corridas','fa-fire',u.total_corridas>=10],['50 km','fa-road',u.km_total>=50],['100 km','fa-medal',u.km_total>=100],['Fotógrafo','fa-camera',u.fotos.length>=1],['7 dias seguidos','fa-calendar-check',u.sequencia>=7],['Desafio','fa-flag-checkered',u.desafios_concluidos>=1]];
+  $('#view').innerHTML=`<section class="card p-5 space-y-5"><div class="flex items-center gap-4">${own?`<label class="relative cursor-pointer" title="Trocar foto de perfil">${av(u.nome,u.foto_perfil,'w-20 h-20 text-2xl')}<span class="absolute -bottom-1 -right-1 w-7 h-7 rounded-full bg-brand flex items-center justify-center text-xs"><i class="fa-solid fa-camera"></i></span><input type="file" accept="image/*" class="hidden" onchange="fotoPerfil(this.files[0])"></label>`:av(u.nome,u.foto_perfil,'w-20 h-20 text-2xl')}<div class="flex-1 min-w-0"><h2 class="text-lg font-bold truncate">${esc(u.nome)}</h2><p class="text-xs text-gray-400">${esc(u.esporte)} · ${esc(u.cidade)}</p></div>${own?'':`<button onclick="seguir(${id})" class="${sig?'border border-line text-gray-300':'btn'} text-xs px-4 py-2 rounded-xl font-semibold">${sig?'Seguindo':'Seguir'}</button>`}</div>
   <div class="space-y-1.5"><div class="flex justify-between text-xs"><span class="font-semibold"><i class="fa-solid fa-bolt text-brand"></i> Nível ${nv}</span><span class="text-gray-400">${kmf(u.km_total%50)} / 50 km</span></div>${bar(u.km_total%50,50)}</div>
-  <div class="grid grid-cols-3">${st('Corridas',u.total_corridas)}${st('Distância',kmf(u.km_total)+' km')}${st('Média',u.total_corridas?kmf(u.km_total/u.total_corridas)+' km':'--')}</div></section>
-  <section class="card p-5 space-y-3"><h3 class="font-bold text-sm">Conquistas</h3><div class="flex justify-between">${conq.map(([n,i,ok])=>`<div class="text-center w-16" title="${n}"><div class="w-12 h-12 mx-auto rounded-full flex items-center justify-center text-lg ${ok?'bg-brand/20 text-brand border border-brand/50':'bg-[#14203a] text-gray-600'}"><i class="fa-solid ${i}"></i></div><p class="text-[10px] mt-1 ${ok?'text-gray-200':'text-gray-600'}">${n}</p></div>`).join('')}</div></section>
+  <div class="grid grid-cols-3">${st('Corridas',u.total_corridas)}${st('Distância',kmf(u.km_total)+' km')}${st('Média',u.total_corridas?kmf(u.km_total/u.total_corridas)+' km':'--')}</div>
+  <div class="grid grid-cols-3">${st('Seguidores',u.seguidores)}${st('Seguindo',u.seguindo)}${st('Sequência',u.sequencia+(u.sequencia===1?' dia':' dias'))}</div></section>
+  <section class="card p-5 space-y-3"><h3 class="font-bold text-sm">Últimos 7 dias</h3><div class="flex items-end gap-2 h-32">${u.semana.map(x=>`<div class="flex-1 flex flex-col items-center justify-end gap-1 h-full"><span class="text-[10px] text-gray-400 h-3">${x.km?kmf(x.km):''}</span><div class="w-full rounded-t-md ${x.km?'bg-gradient-to-t from-brand to-brand2':'bg-[#14203a]'}" style="height:${x.km?Math.max(8,x.km/mx*65):4}%"></div><span class="text-[10px] text-gray-500">${new Date(x.d+'T12:00').toLocaleDateString('pt-BR',{weekday:'narrow'})}</span></div>`).join('')}</div></section>
+  <section class="card p-5 space-y-3"><h3 class="font-bold text-sm">Conquistas</h3><div class="flex gap-3 overflow-x-auto pb-1">${conq.map(([n,i,ok])=>`<div class="text-center w-16 shrink-0" title="${n}"><div class="w-12 h-12 mx-auto rounded-full flex items-center justify-center text-lg ${ok?'bg-brand/20 text-brand border border-brand/50':'bg-[#14203a] text-gray-600'}"><i class="fa-solid ${i}"></i></div><p class="text-[10px] mt-1 ${ok?'text-gray-200':'text-gray-600'}">${n}</p></div>`).join('')}</div></section>
   <section class="card p-5 space-y-3"><h3 class="font-bold text-sm">Metas</h3><div class="space-y-1.5"><div class="flex justify-between text-xs"><span>Chegar a 100 km</span><span class="text-gray-400">${kmf(Math.min(u.km_total,100))}/100 km</span></div>${bar(u.km_total,100)}</div><div class="space-y-1.5"><div class="flex justify-between text-xs"><span>Completar 10 corridas</span><span class="text-gray-400">${Math.min(u.total_corridas,10)}/10</span></div>${bar(u.total_corridas,10)}</div></section>
   ${u.fotos.length?`<div class="grid grid-cols-3 gap-1.5">${u.fotos.map(f=>`<img src="${esc(f)}" alt="Foto" class="aspect-square object-cover rounded-2xl">`).join('')}</div>`:''}
   ${own?`<button onclick="logout()" class="text-xs text-gray-500 hover:text-red-400"><i class="fa-solid fa-right-from-bracket"></i> Sair</button>`:''}`;
 }
+
 /* ---------- Anúncios ---------- */
 const adCard=a=>{const ok=/^https?:\/\//.test(a.link);return `<article data-ad="${a.id}" class="card p-4 space-y-3 border-brand/30"><div class="flex items-center justify-between"><span class="text-[10px] font-semibold text-brand bg-brand/15 px-2 py-0.5 rounded-full">Patrocinado</span><span class="text-[11px] text-gray-500">${esc(a.anunciante)}</span></div>${a.imagem?`<img src="${esc(a.imagem)}" alt="" class="w-full rounded-2xl max-h-60 object-cover">`:''}<div><p class="font-semibold text-sm">${esc(a.titulo)}</p>${a.texto?`<p class="text-xs text-gray-400 mt-1">${esc(a.texto)}</p>`:''}</div><a href="${ok?esc(a.link):'#'}" target="_blank" rel="noopener sponsored" onclick="cliqueAd(${a.id})" class="btn block text-center text-xs py-2.5">Saiba mais</a></article>`};
 const contaAds=()=>document.querySelectorAll('#view [data-ad]').forEach(e=>fetch(`/anuncios/${e.dataset.ad}/impressao`,{method:'POST'}).catch(()=>{}));
@@ -212,7 +231,7 @@ const dbr=d=>d?d.split('-').reverse().join('/'):null;
 const ctrF=(c,i)=>i?(c/i*100).toFixed(1).replace('.',',')+'%':'--';
 async function admin(){
   if(!me.is_admin){$('#view').innerHTML=empty('Acesso restrito a administradores.');return}
-  const top=head('<i class="fa-solid fa-shield-halved text-brand"></i> Administração')+`<div class="flex gap-2">${[['resumo','Resumo'],['anuncios','Anúncios'],['usuarios','Usuários']].map(([k,l])=>pill(adm===k,l,`adm='${k}';admin()`)).join('')}</div>`;
+  const top=head('<i class="fa-solid fa-shield-halved text-brand"></i> Administração')+`<div class="flex gap-2">${[['resumo','Resumo'],['anuncios','Anúncios'],['desafios','Desafios'],['usuarios','Usuários']].map(([k,l])=>pill(adm===k,l,`adm='${k}';admin()`)).join('')}</div>`;
   let body='';
   if(adm==='resumo'){
     const r=await api('/admin/resumo');
@@ -220,6 +239,9 @@ async function admin(){
   }else if(adm==='anuncios'){
     const it=await api('/admin/anuncios');
     body=`<button onclick="novoAnuncio()" class="btn w-full py-2.5 text-sm"><i class="fa-solid fa-plus"></i> Novo anúncio</button>`+(it.length?it.map(a=>`<div class="card p-4 space-y-3"><div class="flex gap-3">${a.imagem?`<img src="${esc(a.imagem)}" alt="" class="w-16 h-16 rounded-xl object-cover">`:`<div class="w-16 h-16 rounded-xl bg-brand/15 text-brand flex items-center justify-center text-xl"><i class="fa-solid fa-bullhorn"></i></div>`}<div class="flex-1 min-w-0"><p class="font-semibold text-sm truncate">${esc(a.titulo)}</p><p class="text-[11px] text-gray-400 truncate">${esc(a.anunciante)} · ${a.cidade?esc(a.cidade):'Todas as cidades'}</p><p class="text-[11px] text-gray-500">${dbr(a.inicio)||'sem início'} → ${dbr(a.fim)||'sem fim'}</p></div><span class="text-[10px] h-fit px-2 py-0.5 rounded-full font-semibold ${a.ativo?'bg-emerald-500/15 text-emerald-400':'bg-gray-500/20 text-gray-400'}">${a.ativo?'Ativo':'Pausado'}</span></div><div class="grid grid-cols-3">${st('Impressões',a.impressoes)}${st('Cliques',a.cliques)}${st('CTR',ctrF(a.cliques,a.impressoes))}</div><div class="flex gap-2"><button onclick="alternarAd(${a.id})" class="flex-1 py-2 rounded-xl border border-line text-xs">${a.ativo?'Pausar':'Ativar'}</button><button onclick="excluir('anuncios',${a.id})" aria-label="Excluir anúncio" class="px-4 py-2 rounded-xl border border-red-500/40 text-red-400 text-xs"><i class="fa-solid fa-trash"></i></button></div></div>`).join(''):empty('Nenhum anúncio criado ainda.'));
+  }else if(adm==='desafios'){
+    const it=await api('/desafios');
+    body=`<button onclick="novoDesafio()" class="btn w-full py-2.5 text-sm"><i class="fa-solid fa-plus"></i> Novo desafio</button>`+(it.length?it.map(d=>`<div class="card p-4 flex items-center gap-3"><div class="flex-1 min-w-0"><p class="font-semibold text-sm truncate">${esc(d.titulo)}</p><p class="text-[11px] text-gray-400">${kmf(d.meta_km,0)} km · ${dbr(d.inicio)} → ${dbr(d.fim)} · ${d.participantes} participantes</p></div><button onclick="excluir('desafios',${d.id})" aria-label="Excluir desafio" class="px-3 py-2 rounded-xl border border-red-500/40 text-red-400 text-xs"><i class="fa-solid fa-trash"></i></button></div>`).join(''):empty('Nenhum desafio ativo.'));
   }else{
     const it=await api('/admin/usuarios'+(bq?'?q='+encodeURIComponent(bq):''));
     body=`<input value="${esc(bq)}" onchange="bq=this.value.trim();admin()" placeholder="Buscar por nome ou e-mail" class="${IN}">`+it.map(u=>`<div class="card p-3 flex items-center gap-3">${av(u.nome,u.foto,'w-10 h-10 text-sm')}<div class="flex-1 min-w-0"><p class="text-sm font-semibold truncate">${esc(u.nome)} ${u.is_admin?'<span class="text-[10px] text-brand">ADMIN</span>':''}${u.ativo?'':'<span class="text-[10px] text-red-400">SUSPENSO</span>'}</p><p class="text-[11px] text-gray-400 truncate">${esc(u.email)} · ${esc(u.cidade)}</p></div>${u.is_admin?'':`<button onclick="suspender(${u.id})" class="text-xs px-3 py-1.5 rounded-xl border ${u.ativo?'border-red-500/40 text-red-400':'border-emerald-500/40 text-emerald-400'}">${u.ativo?'Suspender':'Reativar'}</button>`}</div>`).join('');
@@ -234,6 +256,25 @@ function novoAnuncio(){
 }
 async function alternarAd(id){try{await api(`/admin/anuncios/${id}/alternar`,{method:'POST'});admin()}catch(e){toast(e.message)}}
 async function suspender(id){try{await api(`/admin/usuarios/${id}/suspender`,{method:'POST'});admin()}catch(e){toast(e.message)}}
+/* ---------- Seguir e desafios ---------- */
+async function seguir(id){
+  try{const r=await api(`/usuarios/${id}/seguir`,{method:'POST'});
+  me.seguindo_ids=(me.seguindo_ids||[]).filter(x=>x!==id);if(r.seguindo)me.seguindo_ids.push(id);perfil(id)}catch(e){toast(e.message)}
+}
+const desafioCard=d=>{const dias=Math.max(0,Math.ceil((new Date(d.fim+'T23:59')-new Date())/864e5));return `<div class="card p-4 space-y-3"><div class="flex items-start gap-3"><div class="w-11 h-11 rounded-xl bg-brand/15 text-brand flex items-center justify-center text-lg"><i class="fa-solid fa-flag-checkered"></i></div><div class="flex-1 min-w-0"><p class="font-semibold text-sm">${esc(d.titulo)}</p><p class="text-[11px] text-gray-400">${d.descricao?esc(d.descricao)+' · ':''}${dias} dia${dias===1?'':'s'} restante${dias===1?'':'s'}</p></div>${adminDel('desafios',d.id)}</div>${d.participando?`${bar(d.meu_km,d.meta_km)}<div class="flex justify-between text-[11px] text-gray-400"><span>${kmf(d.meu_km)} / ${kmf(d.meta_km,0)} km${d.concluido?' · <span class="text-emerald-400 font-semibold">Concluído!</span>':''}</span><span>${d.participantes} participantes</span></div>`:`<p class="text-[11px] text-gray-400">Meta: ${kmf(d.meta_km,0)} km · ${d.participantes} participantes</p>`}<div class="flex gap-2">${d.participando?'':`<button onclick="participar(${d.id})" class="btn flex-1 py-2 text-xs">Participar</button>`}<button onclick="rankDesafio(${d.id})" class="flex-1 py-2 rounded-xl border border-line text-xs">Ver ranking</button></div></div>`};
+async function participar(id){try{await api(`/desafios/${id}/participar`,{method:'POST'});toast('Você entrou no desafio!');explorar()}catch(e){toast(e.message)}}
+async function rankDesafio(id){
+  try{const r=await api(`/desafios/${id}/ranking`);
+  $('#modal').innerHTML=`<div class="card p-5 w-full max-w-sm space-y-3"><div class="flex justify-between items-center"><h3 class="font-bold">Ranking do desafio</h3><button type="button" onclick="closeM()" aria-label="Fechar" class="text-gray-400"><i class="fa-solid fa-xmark"></i></button></div>${r.length?r.map((x,i)=>`<div class="flex items-center gap-3"><span class="w-6 text-center font-bold ${i<3?'text-brand':'text-gray-500'}">${i+1}</span>${av(x.nome,x.foto,'w-9 h-9 text-xs')}<span class="flex-1 text-sm truncate">${esc(x.nome)}</span><span class="text-sm font-bold">${kmf(x.km)} km</span></div>`).join(''):'<p class="text-sm text-gray-500 text-center py-6">Ninguém participa ainda.</p>'}</div>`;
+  $('#modal').classList.remove('hidden')}catch(e){toast(e.message)}
+}
+function novoDesafio(){
+  const h=new Date().toISOString().slice(0,10);
+  modal('Novo desafio',F('titulo','Título','placeholder="Desafio 30 dias" required minlength="3" maxlength="100"')+F('descricao','Descrição (opcional)','placeholder="Corra 100 km em 30 dias" maxlength="200"')+F('meta_km','Meta (km)','type="number" step="1" min="1" required')+`<div class="grid grid-cols-2 gap-2"><div>${F('inicio','Início',`type="date" value="${h}" required`)}</div><div>${F('fim','Fim','type="date" required')}</div></div>`,async fd=>{
+    await api('/admin/desafios',{method:'POST',json:{titulo:fd.get('titulo'),descricao:fd.get('descricao')||null,meta_km:+fd.get('meta_km'),inicio:fd.get('inicio'),fim:fd.get('fim')}});admin();
+  },'Criar desafio');
+}
+
 /* ---------- GPS ---------- */
 const hav=(a,b)=>{const r=Math.PI/180,x=(b[0]-a[0])*r,y=(b[1]-a[1])*r,q=Math.sin(x/2)**2+Math.cos(a[0]*r)*Math.cos(b[0]*r)*Math.sin(y/2)**2;return 12742*Math.asin(Math.sqrt(q))};
 function rota(pts,h=150){
@@ -308,6 +349,18 @@ async function publicarG(e){
 function escolher(){
   $('#modal').innerHTML=`<div class="card p-5 w-full max-w-sm space-y-3"><div class="flex justify-between items-center"><h3 class="font-bold">Registrar corrida</h3><button type="button" onclick="closeM()" aria-label="Fechar" class="text-gray-400"><i class="fa-solid fa-xmark"></i></button></div><button onclick="closeM();go('gravar')" class="btn w-full py-3 text-sm"><i class="fa-solid fa-satellite-dish"></i> Gravar com GPS</button><button onclick="closeM();novaCorrida()" class="w-full py-3 text-sm rounded-xl border border-line">Registrar manualmente</button></div>`;
   $('#modal').classList.remove('hidden');
+}
+/* ---------- Modo aplicativo (APK): endereço do servidor ---------- */
+function showServidor(msg=''){
+  const atual=localStorage.getItem('rt_api')||'';
+  $('#auth').innerHTML=`<div class="card auth-card p-6 w-full max-w-sm space-y-4"><div class="text-center"><i class="fa-solid fa-person-running text-brand text-4xl"></i><h1 class="logo text-3xl mt-1">Run<span class="text-brand">Team</span></h1><p class="text-xs text-gray-400 mt-2">Informe o endereço do servidor do RunTeam</p></div><form id="sf" class="space-y-3">${F('u','Endereço','type="url" placeholder="https://meuservidor.com" required value="'+esc(atual)+'"')}<p class="text-[11px] text-gray-500">No mesmo Wi-Fi do computador: http://IP-DO-PC:8000</p><p id="sm" class="text-xs text-red-400">${esc(msg)}</p><button class="btn w-full py-2.5 text-sm">Conectar</button></form>${atual?'<button onclick="boot()" class="w-full text-xs text-gray-400">Cancelar</button>':''}</div>`;
+  $('#auth').classList.remove('hidden');
+  $('#sf').onsubmit=async e=>{
+    e.preventDefault();const u=new FormData(e.target).get('u').trim().replace(/\/+$/,'');
+    $('#sm').textContent='Conectando...';
+    try{const r=await fetch(u+'/anuncios',{method:'GET'});if(!r.ok)throw 0;localStorage.setItem('rt_api',u);location.reload()}
+    catch{$('#sm').textContent='Não consegui conectar. Confira o endereço, se o servidor está ligado e se o celular está na mesma rede.'}
+  };
 }
 boot();
 </script>

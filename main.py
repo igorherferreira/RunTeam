@@ -3,19 +3,19 @@ import math
 import os
 import uuid
 from datetime import date, datetime, timedelta, timezone
-from fastapi.responses import FileResponse
 
 import bcrypt
 import jwt
 from fastapi import Depends, FastAPI, File, Form, HTTPException, UploadFile
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, ConfigDict, EmailStr, Field, computed_field
-from sqlalchemy import delete, func, or_, select, update
+from sqlalchemy import and_, delete, func, or_, select, update
 from sqlalchemy.orm import Session
 
-from models import (Anuncio, Base, Campeonato, Corrida, Curtida, Foto, SessionLocal, Turma,
-                    TurmaMembro, Usuario, engine, preparar_banco)
+from models import (Anuncio, Base, Campeonato, Corrida, Curtida, Desafio, DesafioParticipante, Foto,
+                    SessionLocal, Seguidor, Turma, TurmaMembro, Usuario, engine, preparar_banco)
 
 SECRET_KEY = os.getenv("SECRET_KEY", "troque-esta-chave-em-producao")
 TOLERANCIA_PROVA = 1.03  # 10,2 km conta como prova de 10 km; 10,5 km não
@@ -33,6 +33,13 @@ if ADMIN_EMAIL:
 os.makedirs("uploads", exist_ok=True)
 
 app = FastAPI(title="Atletas API")
+# O app Android abre de https://localhost e conversa com este servidor. Outras origens: CORS_ORIGINS="https://a.com,https://b.com"
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["https://localhost", "http://localhost", "capacitor://localhost"]
+    + [o.strip() for o in os.getenv("CORS_ORIGINS", "").split(",") if o.strip()],
+    allow_methods=["*"], allow_headers=["*"],
+)
 app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
 oauth2 = OAuth2PasswordBearer(tokenUrl="/auth/login")
 
@@ -56,6 +63,19 @@ def usuario_atual(token: str = Depends(oauth2), db: Session = Depends(get_db)) -
     if not usuario.ativo:
         raise HTTPException(403, "Conta suspensa")
     return usuario
+
+
+oauth2_opt = OAuth2PasswordBearer(tokenUrl="/auth/login", auto_error=False)
+
+
+def usuario_opcional(token: str | None = Depends(oauth2_opt),
+                     db: Session = Depends(get_db)) -> Usuario | None:
+    if not token:
+        return None
+    try:
+        return usuario_atual(token, db)
+    except HTTPException:
+        return None
 
 
 def so_admin(u: Usuario = Depends(usuario_atual)) -> Usuario:
@@ -157,7 +177,8 @@ def login(form: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get
 # ---------- Perfil ----------
 @app.get("/usuarios/me")
 def meu_perfil(u: Usuario = Depends(usuario_atual), db: Session = Depends(get_db)):
-    return {**perfil(u.id, db), "is_admin": u.is_admin}
+    seguindo_ids = db.scalars(select(Seguidor.seguido_id).where(Seguidor.seguidor_id == u.id)).all()
+    return {**perfil(u.id, db), "is_admin": u.is_admin, "seguindo_ids": list(seguindo_ids)}
 
 
 @app.get("/usuarios/{usuario_id}")
@@ -172,7 +193,7 @@ def perfil(usuario_id: int, db: Session = Depends(get_db)):
                        .order_by(Foto.id.desc()).limit(30)).all()
     return {"id": u.id, "nome": u.nome, "cidade": u.cidade, "esporte": u.esporte,
             "foto_perfil": u.foto_perfil, "total_corridas": total,
-            "km_total": round(km, 1), "fotos": fotos}
+            "km_total": round(km, 1), "fotos": fotos, **estatisticas(db, u.id)}
 
 
 @app.post("/usuarios/me/foto")
@@ -259,11 +280,18 @@ def curtir(corrida_id: int, u: Usuario = Depends(usuario_atual), db: Session = D
 
 
 @app.get("/feed")
-def feed(cidade: str | None = None, limite: int = 20, db: Session = Depends(get_db)):
+def feed(cidade: str | None = None, limite: int = 20, seguindo: bool = False,
+         u: Usuario | None = Depends(usuario_opcional), db: Session = Depends(get_db)):
     q = (select(Corrida, Usuario.nome, Usuario.foto_perfil).join(Usuario, Usuario.id == Corrida.usuario_id)
          .order_by(Corrida.criado_em.desc()).limit(min(limite, 50)))
     if cidade:
         q = q.where(Usuario.cidade == cidade)
+    if seguindo:
+        if not u:
+            raise HTTPException(401, "Entre na sua conta para ver quem você segue")
+        q = q.where(or_(Corrida.usuario_id == u.id,
+                        Corrida.usuario_id.in_(select(Seguidor.seguido_id)
+                                               .where(Seguidor.seguidor_id == u.id))))
     q = q.where(Usuario.ativo.is_(True))
     itens = []
     for corrida, nome, foto_atleta in db.execute(q):  # N+1 aceitável no MVP; otimize depois
@@ -274,49 +302,6 @@ def feed(cidade: str | None = None, limite: int = 20, db: Session = Depends(get_
                       "trajeto": json.loads(corrida.trajeto) if corrida.trajeto else None, "fotos": [f.url for f in corrida.fotos],
                       "curtidas": curtidas})
     return itens
-
-
-
-# ---------- Excluir publicação ----------
-@app.delete("/corridas/{corrida_id}")
-def excluir_publicacao(
-    corrida_id: int,
-    u: Usuario = Depends(usuario_atual),
-    db: Session = Depends(get_db),
-):
-    corrida = db.get(Corrida, corrida_id)
-
-    if not corrida:
-        raise HTTPException(404, "Publicação não encontrada")
-
-    # O proprietário ou um administrador pode excluir.
-    if corrida.usuario_id != u.id and not u.is_admin:
-        raise HTTPException(
-            403,
-            "Você não tem permissão para excluir esta publicação"
-        )
-
-    # Localiza as fotos associadas à publicação.
-    fotos = db.scalars(
-        select(Foto).where(Foto.corrida_id == corrida_id)
-    ).all()
-
-    # Remove curtidas e fotos do banco.
-    db.execute(
-        delete(Curtida).where(Curtida.corrida_id == corrida_id)
-    )
-
-    for foto in fotos:
-        db.delete(foto)
-
-    # Remove a publicação.
-    db.delete(corrida)
-    db.commit()
-
-    return {
-        "ok": True,
-        "mensagem": "Publicação excluída com sucesso"
-    }
 
 
 # ---------- Ranking ----------
@@ -396,6 +381,121 @@ def listar_campeonatos(cidade: str | None = None, db: Session = Depends(get_db))
         q = q.where(Campeonato.cidade == cidade)
     return [{"id": c.id, "nome": c.nome, "cidade": c.cidade, "data": c.data, "link": c.link}
             for c in db.scalars(q)]
+
+
+# ---------- Estatísticas, seguidores e desafios ----------
+def _km_desafio(db: Session, d: Desafio, uid: int) -> float:
+    return db.scalar(select(func.coalesce(func.sum(Corrida.distancia_km), 0))
+                     .where(Corrida.usuario_id == uid, Corrida.data >= d.inicio,
+                            Corrida.data <= d.fim)) or 0
+
+
+def estatisticas(db: Session, uid: int) -> dict:
+    hoje = date.today()
+    seguidores = db.scalar(select(func.count()).select_from(Seguidor).where(Seguidor.seguido_id == uid))
+    seguindo = db.scalar(select(func.count()).select_from(Seguidor).where(Seguidor.seguidor_id == uid))
+    por_dia = dict(db.execute(
+        select(Corrida.data, func.sum(Corrida.distancia_km))
+        .where(Corrida.usuario_id == uid, Corrida.data >= hoje - timedelta(days=400))
+        .group_by(Corrida.data)).all())
+    semana = [{"d": (hoje - timedelta(days=i)).isoformat(),
+               "km": round(por_dia.get(hoje - timedelta(days=i), 0), 1)} for i in range(6, -1, -1)]
+    dia = hoje if hoje in por_dia else hoje - timedelta(days=1)  # a sequência só quebra se passar um dia inteiro sem correr
+    sequencia = 0
+    while dia in por_dia:
+        sequencia += 1
+        dia -= timedelta(days=1)
+    concluidos = sum(1 for d in db.scalars(
+        select(Desafio).join(DesafioParticipante, DesafioParticipante.desafio_id == Desafio.id)
+        .where(DesafioParticipante.usuario_id == uid)) if _km_desafio(db, d, uid) >= d.meta_km)
+    return {"seguidores": seguidores, "seguindo": seguindo, "sequencia": sequencia,
+            "semana": semana, "desafios_concluidos": concluidos}
+
+
+@app.post("/usuarios/{usuario_id}/seguir")
+def seguir(usuario_id: int, u: Usuario = Depends(usuario_atual), db: Session = Depends(get_db)):
+    alvo = db.get(Usuario, usuario_id)
+    if not alvo or not alvo.ativo:
+        raise HTTPException(404, "Atleta não encontrado")
+    if alvo.id == u.id:
+        raise HTTPException(400, "Você não pode seguir a si mesmo")
+    rel = db.get(Seguidor, (u.id, alvo.id))
+    if rel:
+        db.delete(rel)
+    else:
+        db.add(Seguidor(seguidor_id=u.id, seguido_id=alvo.id))
+    db.commit()
+    total = db.scalar(select(func.count()).select_from(Seguidor).where(Seguidor.seguido_id == alvo.id))
+    return {"seguindo": rel is None, "seguidores": total}
+
+
+class DesafioIn(BaseModel):
+    titulo: str = Field(min_length=3, max_length=100)
+    descricao: str | None = Field(None, max_length=200)
+    meta_km: float = Field(gt=0, le=10000)
+    inicio: date
+    fim: date
+
+
+@app.get("/desafios")
+def listar_desafios(u: Usuario | None = Depends(usuario_opcional), db: Session = Depends(get_db)):
+    res = []
+    for d in db.scalars(select(Desafio).where(Desafio.ativo.is_(True), Desafio.fim >= date.today())
+                        .order_by(Desafio.fim)):
+        participantes = db.scalar(select(func.count()).select_from(DesafioParticipante)
+                                  .where(DesafioParticipante.desafio_id == d.id))
+        participando = bool(u and db.get(DesafioParticipante, (d.id, u.id)))
+        km = _km_desafio(db, d, u.id) if participando else 0
+        res.append({"id": d.id, "titulo": d.titulo, "descricao": d.descricao, "meta_km": d.meta_km,
+                    "inicio": d.inicio, "fim": d.fim, "participantes": participantes,
+                    "participando": participando, "meu_km": round(km, 1), "concluido": km >= d.meta_km})
+    return res
+
+
+@app.post("/desafios/{desafio_id}/participar")
+def participar_desafio(desafio_id: int, u: Usuario = Depends(usuario_atual),
+                       db: Session = Depends(get_db)):
+    d = db.get(Desafio, desafio_id)
+    if not d or not d.ativo or d.fim < date.today():
+        raise HTTPException(404, "Desafio não disponível")
+    if not db.get(DesafioParticipante, (d.id, u.id)):
+        db.add(DesafioParticipante(desafio_id=d.id, usuario_id=u.id))
+        db.commit()
+    return {"ok": True}
+
+
+@app.get("/desafios/{desafio_id}/ranking")
+def ranking_desafio(desafio_id: int, db: Session = Depends(get_db)):
+    d = db.get(Desafio, desafio_id)
+    if not d:
+        raise HTTPException(404, "Desafio não encontrado")
+    km = func.coalesce(func.sum(Corrida.distancia_km), 0)
+    q = (select(Usuario.id, Usuario.nome, Usuario.foto_perfil, km)
+         .join(DesafioParticipante, DesafioParticipante.usuario_id == Usuario.id)
+         .outerjoin(Corrida, and_(Corrida.usuario_id == Usuario.id,
+                                  Corrida.data >= d.inicio, Corrida.data <= d.fim))
+         .where(DesafioParticipante.desafio_id == desafio_id, Usuario.ativo.is_(True))
+         .group_by(Usuario.id, Usuario.nome, Usuario.foto_perfil).order_by(km.desc()).limit(20))
+    return [{"usuario_id": uid, "nome": nome, "foto": foto, "km": round(total, 1)}
+            for uid, nome, foto, total in db.execute(q)]
+
+
+@app.post("/admin/desafios", status_code=201)
+def admin_criar_desafio(dados: DesafioIn, admin: Usuario = Depends(so_admin),
+                        db: Session = Depends(get_db)):
+    if dados.fim < dados.inicio:
+        raise HTTPException(422, "A data final deve ser depois da inicial")
+    d = Desafio(**dados.model_dump())
+    db.add(d)
+    db.commit()
+    return {"id": d.id}
+
+
+@app.delete("/admin/desafios/{desafio_id}")
+def admin_excluir_desafio(desafio_id: int, admin: Usuario = Depends(so_admin),
+                          db: Session = Depends(get_db)):
+    return _excluir(db, Desafio, desafio_id,
+                    [(DesafioParticipante, DesafioParticipante.desafio_id)])
 
 
 # ---------- Anúncios (público) ----------
@@ -547,39 +647,5 @@ def admin_excluir_anuncio(anuncio_id: int, admin: Usuario = Depends(so_admin),
 
 
 # ---------- Site (front-end) ----------
-
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-STATIC_DIR = os.path.join(BASE_DIR, "static")
-
-
-@app.get("/")
-def inicio():
-    index = os.path.join(STATIC_DIR, "Index.html")
-
-    if not os.path.exists(index):
-        return {
-            "status": "online",
-            "api": "RunTeam FastAPI",
-            "erro": "Index.html não encontrado"
-        }
-
-    return FileResponse(index)
-
-
-app.mount(
-    "/static",
-    StaticFiles(directory=STATIC_DIR),
-    name="static"
-)
-
-import os
-import uvicorn
-
-if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 8000))
-
-    uvicorn.run(
-        "main:app",
-        host="0.0.0.0",
-        port=port
-    )
+# Fica por último: as rotas da API têm prioridade e o site responde na raiz "/"
+app.mount("/", StaticFiles(directory=os.path.join(os.path.dirname(__file__), "static"), html=True), name="site")

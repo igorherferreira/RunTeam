@@ -4,16 +4,12 @@ from datetime import date, datetime
 from sqlalchemy import ForeignKey, String, create_engine, false, inspect, text, true
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship, sessionmaker
 
-# Em produção: DATABASE_URL=postgresql://user:senha@host/db?sslmode=require (Neon)
-# Sem a variável, usa o SQLite local.
+# Para PostgreSQL em produção: DATABASE_URL=postgresql+psycopg://user:senha@host/db
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./atletas.db")
-if DATABASE_URL.startswith("postgres://"):
-    DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql://", 1)
-
-if DATABASE_URL.startswith("sqlite"):
-    engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False})
-else:
-    engine = create_engine(DATABASE_URL, pool_pre_ping=True, pool_recycle=300)
+engine = create_engine(
+    DATABASE_URL,
+    connect_args={"check_same_thread": False} if DATABASE_URL.startswith("sqlite") else {},
+)
 SessionLocal = sessionmaker(bind=engine, autoflush=False)
 
 
@@ -104,6 +100,30 @@ class Anuncio(Base):
     impressoes: Mapped[int] = mapped_column(default=0)
     cliques: Mapped[int] = mapped_column(default=0)
     criado_em: Mapped[datetime] = mapped_column(default=datetime.now)
+
+
+class Seguidor(Base):
+    __tablename__ = "seguidores"
+    seguidor_id: Mapped[int] = mapped_column(ForeignKey("usuarios.id"), primary_key=True)
+    seguido_id: Mapped[int] = mapped_column(ForeignKey("usuarios.id"), primary_key=True, index=True)
+
+
+class Desafio(Base):
+    __tablename__ = "desafios"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    titulo: Mapped[str] = mapped_column(String(100))
+    descricao: Mapped[str | None] = mapped_column(String(200))
+    meta_km: Mapped[float]
+    inicio: Mapped[date]
+    fim: Mapped[date]
+    ativo: Mapped[bool] = mapped_column(default=True)
+
+
+class DesafioParticipante(Base):
+    __tablename__ = "desafio_participantes"
+    desafio_id: Mapped[int] = mapped_column(ForeignKey("desafios.id"), primary_key=True)
+    usuario_id: Mapped[int] = mapped_column(ForeignKey("usuarios.id"), primary_key=True)
+    entrou_em: Mapped[datetime] = mapped_column(default=datetime.now)
 
 
 def preparar_banco():
