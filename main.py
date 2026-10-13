@@ -14,8 +14,9 @@ from pydantic import BaseModel, ConfigDict, EmailStr, Field, computed_field
 from sqlalchemy import and_, delete, func, or_, select, update
 from sqlalchemy.orm import Session
 
-from models import (Anuncio, Base, Campeonato, Corrida, Curtida, Desafio, DesafioParticipante, Foto,
-                    SessionLocal, Seguidor, Turma, TurmaMembro, Usuario, engine, preparar_banco)
+from models import (Anuncio, Base, Campeonato, Corrida, Curtida, CurtidaPublicacao, Desafio,
+                    DesafioParticipante, Foto, Publicacao, SessionLocal, Seguidor, Turma, TurmaMembro,
+                    Usuario, engine, preparar_banco)
 
 SECRET_KEY = os.getenv("SECRET_KEY", "troque-esta-chave-em-producao")
 TOLERANCIA_PROVA = 1.03  # 10,2 km conta como prova de 10 km; 10,5 km não
@@ -139,6 +140,7 @@ class TurmaIn(BaseModel):
     horario: datetime
     nivel: str = Field(pattern="^(iniciante|intermediario|avancado)$")
     vagas: int = Field(gt=1, le=200)
+    esporte: str = Field("corrida", pattern="^(corrida|futebol|academia)$")
 
 
 class CampeonatoIn(BaseModel):
@@ -146,6 +148,7 @@ class CampeonatoIn(BaseModel):
     cidade: str
     data: date
     link: str | None = None
+    esporte: str = Field("corrida", pattern="^(corrida|futebol|academia)$")
 
 
 # ---------- Auth ----------
@@ -336,13 +339,14 @@ def criar_turma(dados: TurmaIn, u: Usuario = Depends(usuario_atual),
 
 
 @app.get("/turmas")
-def listar_turmas(cidade: str | None = None, db: Session = Depends(get_db)):
+def listar_turmas(cidade: str | None = None, esporte: str = "corrida", db: Session = Depends(get_db)):
     membros = (select(func.count()).select_from(TurmaMembro)
                .where(TurmaMembro.turma_id == Turma.id).scalar_subquery())
     q = (select(Turma, membros).where(Turma.horario >= datetime.now())
          .order_by(Turma.horario).limit(50))
     if cidade:
         q = q.where(Turma.cidade == cidade)
+    q = q.where(Turma.esporte == esporte)
     return [{"id": t.id, "local": t.local, "horario": t.horario, "nivel": t.nivel,
              "vagas": t.vagas, "inscritos": n} for t, n in db.execute(q)]
 
@@ -375,12 +379,140 @@ def divulgar_campeonato(dados: CampeonatoIn, u: Usuario = Depends(usuario_atual)
 
 
 @app.get("/campeonatos")
-def listar_campeonatos(cidade: str | None = None, db: Session = Depends(get_db)):
-    q = select(Campeonato).where(Campeonato.data >= date.today()).order_by(Campeonato.data)
+def listar_campeonatos(cidade: str | None = None, esporte: str = "corrida", db: Session = Depends(get_db)):
+    q = (select(Campeonato).where(Campeonato.data >= date.today(), Campeonato.esporte == esporte)
+         .order_by(Campeonato.data))
     if cidade:
         q = q.where(Campeonato.cidade == cidade)
     return [{"id": c.id, "nome": c.nome, "cidade": c.cidade, "data": c.data, "link": c.link}
             for c in db.scalars(q)]
+
+
+# ---------- Futebol e Academia: publicações com foto e vídeo curto ----------
+CATEGORIAS = {"futebol": ("jogo", "treino", "lance"), "academia": ("treino", "evolucao", "dica")}
+TIPOS_VIDEO = {"video/mp4": ".mp4", "video/webm": ".webm", "video/quicktime": ".mov"}
+MAX_FOTO_PUB = 10 * 1024 * 1024
+MAX_VIDEO = 30 * 1024 * 1024
+
+
+def salvar_midia(arquivo: UploadFile) -> tuple[str, str]:
+    if arquivo.content_type in TIPOS_VIDEO:
+        ext, tipo, limite = TIPOS_VIDEO[arquivo.content_type], "video", MAX_VIDEO
+    elif arquivo.content_type in TIPOS_IMAGEM:
+        ext, tipo, limite = TIPOS_IMAGEM[arquivo.content_type], "foto", MAX_FOTO_PUB
+    else:
+        raise HTTPException(415, "Envie uma foto (JPG, PNG, WEBP) ou um vídeo curto (MP4, WEBM, MOV)")
+    conteudo = arquivo.file.read(limite + 1)
+    if len(conteudo) > limite:
+        raise HTTPException(413, f"O arquivo deve ter até {limite // (1024 * 1024)} MB")
+    nome = f"{uuid.uuid4().hex}{ext}"
+    with open(os.path.join("uploads", nome), "wb") as f:
+        f.write(conteudo)
+    return f"/uploads/{nome}", tipo
+
+
+def _remover_arquivo(url: str | None) -> None:
+    if url and url.startswith("/uploads/"):
+        try:
+            os.remove(os.path.join("uploads", os.path.basename(url)))
+        except OSError:
+            pass
+
+
+@app.post("/publicacoes", status_code=201)
+def criar_publicacao(esporte: str = Form(...), midia: UploadFile = File(...),
+                     legenda: str | None = Form(None, max_length=300),
+                     categoria: str | None = Form(None),
+                     u: Usuario = Depends(usuario_atual), db: Session = Depends(get_db)):
+    if esporte not in CATEGORIAS:
+        raise HTTPException(422, "Esporte inválido")
+    if categoria and categoria not in CATEGORIAS[esporte]:
+        raise HTTPException(422, "Categoria inválida para este esporte")
+    url, tipo = salvar_midia(midia)
+    p = Publicacao(usuario_id=u.id, esporte=esporte, tipo=tipo, midia_url=url,
+                   legenda=(legenda or "").strip() or None, categoria=categoria or None)
+    db.add(p)
+    db.commit()
+    return {"id": p.id, "url": url, "tipo": tipo}
+
+
+@app.get("/publicacoes")
+def listar_publicacoes(esporte: str, usuario_id: int | None = None, seguindo: bool = False,
+                       limite: int = 30, u: Usuario | None = Depends(usuario_opcional),
+                       db: Session = Depends(get_db)):
+    if esporte not in CATEGORIAS:
+        raise HTTPException(422, "Esporte inválido")
+    q = (select(Publicacao, Usuario.nome, Usuario.foto_perfil)
+         .join(Usuario, Usuario.id == Publicacao.usuario_id)
+         .where(Publicacao.esporte == esporte, Usuario.ativo.is_(True))
+         .order_by(Publicacao.id.desc()).limit(min(limite, 60)))
+    if usuario_id:
+        q = q.where(Publicacao.usuario_id == usuario_id)
+    if seguindo:
+        if not u:
+            raise HTTPException(401, "Entre na sua conta para ver quem você segue")
+        q = q.where(or_(Publicacao.usuario_id == u.id,
+                        Publicacao.usuario_id.in_(select(Seguidor.seguido_id)
+                                                  .where(Seguidor.seguidor_id == u.id))))
+    linhas = db.execute(q).all()
+    ids = [p.id for p, _, _ in linhas]
+    curtidas = dict(db.execute(select(CurtidaPublicacao.publicacao_id, func.count())
+                               .where(CurtidaPublicacao.publicacao_id.in_(ids))
+                               .group_by(CurtidaPublicacao.publicacao_id)).all()) if ids else {}
+    meus = set(db.scalars(select(CurtidaPublicacao.publicacao_id)
+                          .where(CurtidaPublicacao.usuario_id == u.id,
+                                 CurtidaPublicacao.publicacao_id.in_(ids)))) if (u and ids) else set()
+    return [{"id": p.id, "usuario_id": p.usuario_id, "atleta": nome, "atleta_foto": foto,
+             "esporte": p.esporte, "tipo": p.tipo, "midia": p.midia_url, "legenda": p.legenda,
+             "categoria": p.categoria, "criado_em": p.criado_em.isoformat() + "Z",
+             "curtidas": curtidas.get(p.id, 0), "curtiu": p.id in meus}
+            for p, nome, foto in linhas]
+
+
+@app.post("/publicacoes/{publicacao_id}/curtir")
+def curtir_publicacao(publicacao_id: int, u: Usuario = Depends(usuario_atual),
+                      db: Session = Depends(get_db)):
+    if not db.scalar(select(Publicacao.id).where(Publicacao.id == publicacao_id)):
+        raise HTTPException(404, "Publicação não encontrada")
+    curtida = db.get(CurtidaPublicacao, (u.id, publicacao_id))
+    if curtida:
+        db.delete(curtida)
+    else:
+        db.add(CurtidaPublicacao(usuario_id=u.id, publicacao_id=publicacao_id))
+    db.commit()
+    return {"curtiu": curtida is None}
+
+
+@app.delete("/publicacoes/{publicacao_id}")
+def apagar_publicacao(publicacao_id: int, u: Usuario = Depends(usuario_atual),
+                      db: Session = Depends(get_db)):
+    p = db.get(Publicacao, publicacao_id)
+    if not p:
+        raise HTTPException(404, "Publicação não encontrada")
+    if p.usuario_id != u.id and not u.is_admin:
+        raise HTTPException(403, "Você só pode apagar as suas publicações")
+    url = p.midia_url
+    db.execute(delete(CurtidaPublicacao).where(CurtidaPublicacao.publicacao_id == publicacao_id))
+    db.execute(delete(Publicacao).where(Publicacao.id == publicacao_id))
+    db.commit()
+    _remover_arquivo(url)  # apaga também o arquivo de foto/vídeo
+    return {"ok": True}
+
+
+@app.get("/destaques")
+def destaques(esporte: str, db: Session = Depends(get_db)):
+    if esporte not in CATEGORIAS:
+        raise HTTPException(422, "Esporte inválido")
+    n_curtidas = func.count(CurtidaPublicacao.usuario_id)
+    n_posts = func.count(func.distinct(Publicacao.id))
+    q = (select(Usuario.id, Usuario.nome, Usuario.foto_perfil, n_posts, n_curtidas)
+         .join(Publicacao, Publicacao.usuario_id == Usuario.id)
+         .outerjoin(CurtidaPublicacao, CurtidaPublicacao.publicacao_id == Publicacao.id)
+         .where(Publicacao.esporte == esporte, Usuario.ativo.is_(True))
+         .group_by(Usuario.id, Usuario.nome, Usuario.foto_perfil)
+         .order_by(n_curtidas.desc(), n_posts.desc()).limit(30))
+    return [{"usuario_id": i, "nome": n, "foto": f, "posts": p, "curtidas": c}
+            for i, n, f, p, c in db.execute(q)]
 
 
 # ---------- Estatísticas, seguidores e desafios ----------

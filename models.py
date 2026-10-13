@@ -1,5 +1,5 @@
 import os
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 
 from sqlalchemy import ForeignKey, String, create_engine, false, inspect, text, true
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship, sessionmaker
@@ -67,6 +67,7 @@ class Turma(Base):
     horario: Mapped[datetime]
     nivel: Mapped[str] = mapped_column(String(20))
     vagas: Mapped[int]
+    esporte: Mapped[str] = mapped_column(String(10), default="corrida", server_default="corrida")
 
 
 class TurmaMembro(Base):
@@ -83,6 +84,7 @@ class Campeonato(Base):
     cidade: Mapped[str] = mapped_column(String(80), index=True)
     data: Mapped[date]
     link: Mapped[str | None]
+    esporte: Mapped[str] = mapped_column(String(10), default="corrida", server_default="corrida")
 
 
 class Anuncio(Base):
@@ -100,6 +102,25 @@ class Anuncio(Base):
     impressoes: Mapped[int] = mapped_column(default=0)
     cliques: Mapped[int] = mapped_column(default=0)
     criado_em: Mapped[datetime] = mapped_column(default=datetime.now)
+
+
+class Publicacao(Base):
+    """Foto ou vídeo curto postado em um esporte (futebol, academia)."""
+    __tablename__ = "publicacoes"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    usuario_id: Mapped[int] = mapped_column(ForeignKey("usuarios.id"), index=True)
+    esporte: Mapped[str] = mapped_column(String(10), index=True)
+    tipo: Mapped[str] = mapped_column(String(5))  # foto | video
+    midia_url: Mapped[str]
+    legenda: Mapped[str | None] = mapped_column(String(300))
+    categoria: Mapped[str | None] = mapped_column(String(20))
+    criado_em: Mapped[datetime] = mapped_column(default=lambda: datetime.now(timezone.utc).replace(tzinfo=None))  # UTC
+
+
+class CurtidaPublicacao(Base):
+    __tablename__ = "curtidas_publicacoes"
+    usuario_id: Mapped[int] = mapped_column(ForeignKey("usuarios.id"), primary_key=True)
+    publicacao_id: Mapped[int] = mapped_column(ForeignKey("publicacoes.id"), primary_key=True)
 
 
 class Seguidor(Base):
@@ -140,3 +161,6 @@ def preparar_banco():
             con.execute(text("ALTER TABLE corridas ADD COLUMN trajeto VARCHAR"))
         if "origem" not in corridas:
             con.execute(text("ALTER TABLE corridas ADD COLUMN origem VARCHAR(10) NOT NULL DEFAULT 'manual'"))
+        for tabela in ("turmas", "campeonatos"):
+            if "esporte" not in {c["name"] for c in inspect(con).get_columns(tabela)}:
+                con.execute(text(f"ALTER TABLE {tabela} ADD COLUMN esporte VARCHAR(10) NOT NULL DEFAULT 'corrida'"))

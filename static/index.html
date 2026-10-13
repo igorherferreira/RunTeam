@@ -61,10 +61,10 @@ input:-webkit-autofill{-webkit-box-shadow:0 0 0 40px #0a1120 inset;-webkit-text-
     <div class="flex items-center gap-3"><button id="adminBtn" onclick="go('admin')" aria-label="Painel do administrador" class="hidden w-9 h-9 rounded-full bg-brand/15 text-brand"><i class="fa-solid fa-shield-halved"></i></button><button id="who" onclick="go('perfil')" aria-label="Meu perfil"></button></div>
   </header>
 
-  <button id="recbar" onclick="go('gravar')" class="hidden w-full bg-brand text-white text-xs font-semibold py-1.5 sticky top-[57px] z-30"></button>
+  <div class="sticky z-30 bg-ink/90 backdrop-blur-xl" style="top:calc(57px + var(--sat))"><div id="spbar" class="flex gap-1 p-1 mx-auto my-2 max-w-md rounded-full bg-card border border-line"></div><button id="recbar" onclick="go('gravar')" class="hidden w-full bg-brand text-white text-xs font-semibold py-1.5"></button></div>
   <main id="view" class="max-w-2xl mx-auto p-4 space-y-3 pb-28"></main>
 
-  <button id="fab" onclick="escolher()" aria-label="Registrar corrida" class="btn fixed right-4 bottom-24 md:bottom-6 z-40 w-14 h-14 rounded-full text-xl"><i class="fa-solid fa-plus"></i></button>
+  <button id="fab" onclick="fab()" aria-label="Registrar corrida" class="btn fixed right-4 bottom-24 md:bottom-6 z-40 w-14 h-14 rounded-full text-xl"><i class="fa-solid fa-plus"></i></button>
   <div id="mnav" class="md:hidden fixed bottom-0 inset-x-0 z-40 bg-ink/95 backdrop-blur-xl border-t border-line px-1 pt-2 pb-3 flex justify-around"></div>
 </div>
 
@@ -90,7 +90,7 @@ const bar=(v,m)=>`<div class="h-2 bg-[#14203a] rounded-full overflow-hidden"><di
 const SITE=(RT_APP&&localStorage.getItem('rt_api'))||location.origin;
 const NIVEL={iniciante:'Iniciante',intermediario:'Intermediário',avancado:'Avançado'};
 const TABS=[['home','Início','fa-house'],['explorar','Explorar','fa-compass'],['grupos','Corridas','fa-person-running'],['ranking','Ranking','fa-trophy'],['perfil','Perfil','fa-user']];
-let token=localStorage.getItem('t'),me=null,cur='home',rk={d:10,c:'',g:false},fc='todos';
+let token=localStorage.getItem('t'),me=null,cur='home',rk={d:10,c:'',g:false},fc='todos',sp=['corrida','futebol','academia'].includes(localStorage.getItem('rt_sp'))?localStorage.getItem('rt_sp'):'corrida';
 
 async function api(path,o={}){
   const h={...(o.headers||{})};
@@ -132,10 +132,12 @@ async function boot(){
 }
 
 function nav(){
-  $('#dnav').innerHTML=TABS.map(([k,l,i])=>`<button onclick="go('${k}')" class="px-4 py-2 rounded-full text-xs font-semibold flex items-center gap-2 ${k===cur?'bg-brand text-white':'text-gray-400 hover:text-white'}"><i class="fa-solid ${i}"></i>${l}</button>`).join('');
-  $('#mnav').innerHTML=TABS.map(([k,l,i])=>`<button onclick="go('${k}')" class="flex flex-col items-center text-[11px] font-medium px-3 py-1 ${k===cur?'text-brand':'text-gray-500'}"><i class="fa-solid ${i} text-xl mb-1"></i>${l}</button>`).join('');
+  const T=tabsAtuais();
+  $('#dnav').innerHTML=T.map(([k,l,i])=>`<button onclick="go('${k}')" class="px-4 py-2 rounded-full text-xs font-semibold flex items-center gap-2 ${k===cur?'bg-brand text-white':'text-gray-400 hover:text-white'}"><i class="fa-solid ${i}"></i>${l}</button>`).join('');
+  $('#mnav').innerHTML=T.map(([k,l,i])=>`<button onclick="go('${k}')" class="flex flex-col items-center text-[11px] font-medium px-3 py-1 ${k===cur?'text-brand':'text-gray-500'}"><i class="fa-solid ${i} text-xl mb-1"></i>${l}</button>`).join('');
+  $('#spbar').innerHTML=Object.entries(SP).map(([k,v])=>`<button onclick="setSp('${k}')" class="flex-1 flex items-center justify-center gap-2 py-1.5 rounded-full text-xs font-semibold ${k===sp?'bg-brand text-white':'text-gray-400'}"><i class="fa-solid ${v.ic}"></i>${v.nome}</button>`).join('');
 }
-const views={home,explorar,grupos,ranking,perfil:()=>perfil(),admin,gravar};
+const views={home:()=>sp==='corrida'?home():feedSocial(),explorar,grupos,ranking,destaques,perfil:()=>sp==='corrida'?perfil():perfilSocial(),admin,gravar};
 async function go(t){cur=t;nav();upd();$('#view').innerHTML=empty('Carregando...');scrollTo(0,0);try{await views[t]()}catch(e){toast(e.message)}}
 
 const ring=(km,meta=10)=>{const r=88,c=2*Math.PI*r,p=Math.min(1,km/meta);return `<div class="relative w-52 h-52 mx-auto"><svg viewBox="0 0 200 200" class="w-full h-full -rotate-90"><defs><linearGradient id="rg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#1e90ff"/><stop offset="1" stop-color="#19d3c5"/></linearGradient></defs><circle cx="100" cy="100" r="${r}" fill="none" stroke="#14203a" stroke-width="10"/><circle cx="100" cy="100" r="${r}" fill="none" stroke="url(#rg)" stroke-width="10" stroke-linecap="round" stroke-dasharray="${c*p} ${c}"/></svg><div class="absolute inset-0 flex flex-col items-center justify-center"><i class="fa-solid fa-person-running text-brand text-xl mb-1"></i><p class="text-4xl font-bold">${kmf(km,2)}<span class="text-lg font-medium"> km</span></p><p class="text-xs text-gray-400">Distância</p></div></div>`};
@@ -178,26 +180,26 @@ async function ranking(){
 }
 
 async function grupos(){
-  const it=await api('/turmas?cidade='+encodeURIComponent(me.cidade));
-  $('#view').innerHTML=head('Corrida em Grupo',`<button onclick="novaTurma()" class="btn text-xs px-4 py-2"><i class="fa-solid fa-plus"></i> Criar chamado</button>`)
+  const it=await api('/turmas?esporte='+sp+'&cidade='+encodeURIComponent(me.cidade));
+  $('#view').innerHTML=head(SP[sp].grupo,`<button onclick="novaTurma()" class="btn text-xs px-4 py-2"><i class="fa-solid fa-plus"></i> Criar chamado</button>`)
   +(it.length?it.map(t=>`<div class="card p-4 space-y-3"><div class="flex justify-between items-start"><div><p class="font-semibold">${esc(t.local)}</p><p class="text-[11px] text-gray-400"><i class="fa-regular fa-calendar text-brand"></i> ${new Date(t.horario).toLocaleString('pt-BR',{weekday:'short',day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit'})}</p></div><span class="text-[10px] bg-brand/15 text-brand px-3 py-1 rounded-full font-semibold">${NIVEL[t.nivel]||esc(t.nivel)}</span></div>${bar(t.inscritos,t.vagas)}
    <div class="flex justify-between items-center"><span class="text-[11px] text-gray-400"><i class="fa-solid fa-users"></i> ${t.inscritos} de ${t.vagas} vagas</span><div class="flex items-center gap-1">${adminDel('turmas',t.id)}<button onclick="entrarTurma(${t.id})" class="btn text-xs px-5 py-2">Entrar</button></div></div></div>`).join(''):empty('Nenhuma turma marcada na sua cidade. Crie a primeira!'));
 }
 async function entrarTurma(id){try{await api(`/turmas/${id}/entrar`,{method:'POST'});toast('Você entrou na turma!');grupos()}catch(e){toast(e.message)}}
 function novaTurma(){
-  modal('Criar chamado',F('local','Local','placeholder="Parque Municipal" required')+F('horario','Data e hora','type="datetime-local" required')+`<label class="block text-[11px] text-gray-400 mb-1">Nível</label><select name="nivel" class="${IN}">${Object.entries(NIVEL).map(([k,v])=>`<option value="${k}">${v}</option>`).join('')}</select>`+F('vagas','Vagas','type="number" min="2" max="200" value="10" required'),async fd=>{
-    await api('/turmas',{method:'POST',json:{local:fd.get('local'),horario:fd.get('horario'),nivel:fd.get('nivel'),vagas:+fd.get('vagas')}});grupos();
+  modal('Criar chamado',F('local','Local',`placeholder="${SP[sp].local}" required`)+F('horario','Data e hora','type="datetime-local" required')+`<label class="block text-[11px] text-gray-400 mb-1">Nível</label><select name="nivel" class="${IN}">${Object.entries(NIVEL).map(([k,v])=>`<option value="${k}">${v}</option>`).join('')}</select>`+F('vagas','Vagas','type="number" min="2" max="200" value="10" required'),async fd=>{
+    await api('/turmas',{method:'POST',json:{local:fd.get('local'),horario:fd.get('horario'),nivel:fd.get('nivel'),vagas:+fd.get('vagas'),esporte:sp}});grupos();
   },'Publicar');
 }
 
 async function explorar(){
-  const [it,ads,ds]=await Promise.all([api('/campeonatos?cidade='+encodeURIComponent(me.cidade)),getAds(),api('/desafios')]);
+  const [it,ads,ds]=await Promise.all([api('/campeonatos?esporte='+sp+'&cidade='+encodeURIComponent(me.cidade)),getAds(),sp==='corrida'?api('/desafios'):Promise.resolve([])]);
   $('#view').innerHTML=head('Explorar',`<button onclick="novoEvento()" class="btn text-xs px-4 py-2"><i class="fa-solid fa-plus"></i> Divulgar</button>`)+`${ds.length?`<h3 class="font-bold text-sm pt-1">Desafios</h3>${ds.map(desafioCard).join('')}`:''}${ads[0]?adCard(ads[0]):''}<h3 class="font-bold text-sm pt-1">Campeonatos em ${esc(me.cidade)}</h3>`
   +(it.length?it.map(c=>`<div class="card p-4 flex items-center gap-3"><div class="w-14 h-14 rounded-2xl bg-brand/15 flex flex-col items-center justify-center"><span class="font-bold text-lg text-brand leading-none">${c.data.slice(8,10)}</span><span class="text-[10px] text-gray-400 uppercase">${new Date(c.data+'T12:00').toLocaleString('pt-BR',{month:'short'})}</span></div><div class="flex-1"><p class="font-semibold text-sm">${esc(c.nome)}</p><p class="text-[11px] text-gray-400">${esc(c.cidade)}</p></div>${adminDel('campeonatos',c.id)}${c.link&&/^https?:\/\//.test(c.link)?`<a href="${esc(c.link)}" target="_blank" rel="noopener" class="text-xs text-brand font-semibold">Inscrição <i class="fa-solid fa-arrow-up-right-from-square"></i></a>`:''}</div>`).join(''):empty('Nenhum campeonato divulgado na sua cidade.'));contaAds();
 }
 function novoEvento(){
   modal('Divulgar campeonato',F('nome','Nome','required')+F('cidade','Cidade',`value="${esc(me.cidade)}" required`)+F('data','Data','type="date" required')+F('link','Link de inscrição (opcional)','type="url" placeholder="https://"'),async fd=>{
-    await api('/campeonatos',{method:'POST',json:{nome:fd.get('nome'),cidade:fd.get('cidade'),data:fd.get('data'),link:fd.get('link')||null}});explorar();
+    await api('/campeonatos',{method:'POST',json:{nome:fd.get('nome'),cidade:fd.get('cidade'),data:fd.get('data'),link:fd.get('link')||null,esporte:sp}});explorar();
   },'Publicar');
 }
 
@@ -205,7 +207,7 @@ async function fotoPerfil(f){
   if(!f)return;
   if(f.size>5*1024*1024){toast('A foto deve ter até 5 MB');return}
   const b=new FormData();b.append('arquivo',f);
-  try{const r=await api('/usuarios/me/foto',{method:'POST',body:b});me.foto_perfil=r.url;setWho();perfil()}catch(e){toast(e.message)}
+  try{const r=await api('/usuarios/me/foto',{method:'POST',body:b});me.foto_perfil=r.url;setWho();sp==='corrida'?perfil():perfilSocial()}catch(e){toast(e.message)}
 }
 async function perfil(id){
   id=id||me.id;const u=await api('/usuarios/'+id),own=id===me.id,sig=(me.seguindo_ids||[]).includes(id);
@@ -246,7 +248,7 @@ async function admin(){
     body=`<div class="grid grid-cols-2 gap-3">${[['Atletas',r.usuarios,'fa-users'],['Corridas',r.corridas,'fa-person-running'],['Km percorridos',kmf(r.km_total),'fa-route'],['Turmas',r.turmas,'fa-people-group'],['Campeonatos',r.campeonatos,'fa-flag-checkered'],['Anúncios ativos',r.anuncios_ativos,'fa-bullhorn'],['Impressões',r.impressoes,'fa-eye'],['Cliques (CTR '+ctrF(r.cliques,r.impressoes)+')',r.cliques,'fa-hand-pointer']].map(([l,v,i])=>`<div class="card p-4"><i class="fa-solid ${i} text-brand"></i><p class="text-2xl font-bold mt-2">${v}</p><p class="text-[11px] text-gray-400">${l}</p></div>`).join('')}</div>`;
   }else if(adm==='anuncios'){
     const it=await api('/admin/anuncios');
-    body=`<button onclick="novoAnuncio()" class="btn w-full py-2.5 text-sm"><i class="fa-solid fa-plus"></i> Novo anúncio</button>`+(it.length?it.map(a=>`<div class="card p-4 space-y-3"><div class="flex gap-3">${a.imagem?`<img src="${esc(a.imagem)}" alt="" class="w-16 h-16 rounded-xl object-cover">`:`<div class="w-16 h-16 rounded-xl bg-brand/15 text-brand flex items-center justify-center text-xl"><i class="fa-solid fa-bullhorn"></i></div>`}<div class="flex-1 min-w-0"><p class="font-semibold text-sm truncate">${esc(a.titulo)}</p><p class="text-[11px] text-gray-400 truncate">${esc(a.anunciante)} · ${a.cidade?esc(a.cidade):'Todas as cidades'}</p><p class="text-[11px] text-gray-500">${dbr(a.inicio)||'sem início'} → ${dbr(a.fim)||'sem fim'}</p></div><span class="text-[10px] h-fit px-2 py-0.5 rounded-full font-semibold ${a.ativo?'bg-emerald-500/15 text-emerald-400':'bg-gray-500/20 text-gray-400'}">${a.ativo?'Ativo':'Pausado'}</span></div><div class="grid grid-cols-3">${st('Impressões',a.impressoes)}${st('Cliques',a.cliques)}${st('CTR',ctrF(a.cliques,a.impressoes))}</div><div class="flex gap-2"><button onclick="alternarAd(${a.id})" class="flex-1 py-2 rounded-xl border border-line text-xs">${a.ativo?'Pausar':'Ativar'}</button><button onclick="excluir('anuncios',${a.id})" aria-label="Excluir anúncio" class="px-4 py-2 rounded-xl border border-red-500/40 text-red-400 text-xs"><i class="fa-solid fa-trash"></i></button></div></div>`).join(''):empty('Nenhum anúncio criado ainda.'));
+    body=`<p class="text-[11px] text-gray-500">Os anúncios aparecem para todos os esportes.</p><button onclick="novoAnuncio()" class="btn w-full py-2.5 text-sm"><i class="fa-solid fa-plus"></i> Novo anúncio</button>`+(it.length?it.map(a=>`<div class="card p-4 space-y-3"><div class="flex gap-3">${a.imagem?`<img src="${esc(a.imagem)}" alt="" class="w-16 h-16 rounded-xl object-cover">`:`<div class="w-16 h-16 rounded-xl bg-brand/15 text-brand flex items-center justify-center text-xl"><i class="fa-solid fa-bullhorn"></i></div>`}<div class="flex-1 min-w-0"><p class="font-semibold text-sm truncate">${esc(a.titulo)}</p><p class="text-[11px] text-gray-400 truncate">${esc(a.anunciante)} · ${a.cidade?esc(a.cidade):'Todas as cidades'}</p><p class="text-[11px] text-gray-500">${dbr(a.inicio)||'sem início'} → ${dbr(a.fim)||'sem fim'}</p></div><span class="text-[10px] h-fit px-2 py-0.5 rounded-full font-semibold ${a.ativo?'bg-emerald-500/15 text-emerald-400':'bg-gray-500/20 text-gray-400'}">${a.ativo?'Ativo':'Pausado'}</span></div><div class="grid grid-cols-3">${st('Impressões',a.impressoes)}${st('Cliques',a.cliques)}${st('CTR',ctrF(a.cliques,a.impressoes))}</div><div class="flex gap-2"><button onclick="alternarAd(${a.id})" class="flex-1 py-2 rounded-xl border border-line text-xs">${a.ativo?'Pausar':'Ativar'}</button><button onclick="excluir('anuncios',${a.id})" aria-label="Excluir anúncio" class="px-4 py-2 rounded-xl border border-red-500/40 text-red-400 text-xs"><i class="fa-solid fa-trash"></i></button></div></div>`).join(''):empty('Nenhum anúncio criado ainda.'));
   }else if(adm==='desafios'){
     const it=await api('/desafios');
     body=`<button onclick="novoDesafio()" class="btn w-full py-2.5 text-sm"><i class="fa-solid fa-plus"></i> Novo desafio</button>`+(it.length?it.map(d=>`<div class="card p-4 flex items-center gap-3"><div class="flex-1 min-w-0"><p class="font-semibold text-sm truncate">${esc(d.titulo)}</p><p class="text-[11px] text-gray-400">${kmf(d.meta_km,0)} km · ${dbr(d.inicio)} → ${dbr(d.fim)} · ${d.participantes} participantes</p></div><button onclick="excluir('desafios',${d.id})" aria-label="Excluir desafio" class="px-3 py-2 rounded-xl border border-red-500/40 text-red-400 text-xs"><i class="fa-solid fa-trash"></i></button></div>`).join(''):empty('Nenhum desafio ativo.'));
@@ -267,7 +269,7 @@ async function suspender(id){try{await api(`/admin/usuarios/${id}/suspender`,{me
 /* ---------- Seguir e desafios ---------- */
 async function seguir(id){
   try{const r=await api(`/usuarios/${id}/seguir`,{method:'POST'});
-  me.seguindo_ids=(me.seguindo_ids||[]).filter(x=>x!==id);if(r.seguindo)me.seguindo_ids.push(id);perfil(id)}catch(e){toast(e.message)}
+  me.seguindo_ids=(me.seguindo_ids||[]).filter(x=>x!==id);if(r.seguindo)me.seguindo_ids.push(id);sp==='corrida'?perfil(id):perfilSocial(id)}catch(e){toast(e.message)}
 }
 const desafioCard=d=>{const dias=Math.max(0,Math.ceil((new Date(d.fim+'T23:59')-new Date())/864e5));return `<div class="card p-4 space-y-3"><div class="flex items-start gap-3"><div class="w-11 h-11 rounded-xl bg-brand/15 text-brand flex items-center justify-center text-lg"><i class="fa-solid fa-flag-checkered"></i></div><div class="flex-1 min-w-0"><p class="font-semibold text-sm">${esc(d.titulo)}</p><p class="text-[11px] text-gray-400">${d.descricao?esc(d.descricao)+' · ':''}${dias} dia${dias===1?'':'s'} restante${dias===1?'':'s'}</p></div>${adminDel('desafios',d.id)}</div>${d.participando?`${bar(d.meu_km,d.meta_km)}<div class="flex justify-between text-[11px] text-gray-400"><span>${kmf(d.meu_km)} / ${kmf(d.meta_km,0)} km${d.concluido?' · <span class="text-emerald-400 font-semibold">Concluído!</span>':''}</span><span>${d.participantes} participantes</span></div>`:`<p class="text-[11px] text-gray-400">Meta: ${kmf(d.meta_km,0)} km · ${d.participantes} participantes</p>`}<div class="flex gap-2">${d.participando?'':`<button onclick="participar(${d.id})" class="btn flex-1 py-2 text-xs">Participar</button>`}<button onclick="rankDesafio(${d.id})" class="flex-1 py-2 rounded-xl border border-line text-xs">Ver ranking</button></div></div>`};
 async function participar(id){try{await api(`/desafios/${id}/participar`,{method:'POST'});toast('Você entrou no desafio!');explorar()}catch(e){toast(e.message)}}
@@ -281,6 +283,54 @@ function novoDesafio(){
   modal('Novo desafio',F('titulo','Título','placeholder="Desafio 30 dias" required minlength="3" maxlength="100"')+F('descricao','Descrição (opcional)','placeholder="Corra 100 km em 30 dias" maxlength="200"')+F('meta_km','Meta (km)','type="number" step="1" min="1" required')+`<div class="grid grid-cols-2 gap-2"><div>${F('inicio','Início',`type="date" value="${h}" required`)}</div><div>${F('fim','Fim','type="date" required')}</div></div>`,async fd=>{
     await api('/admin/desafios',{method:'POST',json:{titulo:fd.get('titulo'),descricao:fd.get('descricao')||null,meta_km:+fd.get('meta_km'),inicio:fd.get('inicio'),fim:fd.get('fim')}});admin();
   },'Criar desafio');
+}
+
+/* ---------- Esportes: Corrida, Futebol, Academia ---------- */
+const SP={corrida:{nome:'Corrida',em:'na corrida',ic:'fa-person-running',grupo:'Corrida em Grupo',aba:'Corridas',local:'Parque Municipal'},
+  futebol:{nome:'Futebol',em:'no futebol',ic:'fa-futbol',grupo:'Rachão',aba:'Rachão',local:'Campo ou quadra',cats:{jogo:'Jogo',treino:'Treino',lance:'Lance'}},
+  academia:{nome:'Academia',em:'na academia',ic:'fa-dumbbell',grupo:'Treino em Grupo',aba:'Treinos',local:'Nome da academia',cats:{treino:'Treino',evolucao:'Evolução',dica:'Dica'}}};
+const tabsAtuais=()=>sp==='corrida'?TABS:[['home','Início','fa-house'],['explorar','Explorar','fa-compass'],['grupos',SP[sp].aba,'fa-people-group'],['destaques','Destaques','fa-fire'],['perfil','Perfil','fa-user']];
+function setSp(s){if(s===sp)return;sp=s;localStorage.setItem('rt_sp',s);fc='todos';go('home')}
+const fab=()=>sp==='corrida'?escolher():novaPub();
+const tempo=d=>{const s=Math.max(0,(Date.now()-new Date(d))/1000);return s<60?'agora':s<3600?`há ${Math.floor(s/60)} min`:s<86400?`há ${Math.floor(s/3600)} h`:s<172800?'ontem':new Date(d).toLocaleDateString('pt-BR',{day:'2-digit',month:'short'})};
+const duracao=f=>new Promise(r=>{const v=document.createElement('video'),u=URL.createObjectURL(f);const fim=d=>{URL.revokeObjectURL(u);r(d)};v.preload='metadata';v.onloadedmetadata=()=>fim(v.duration);v.onerror=()=>fim(0);setTimeout(()=>fim(0),4000);v.src=u});
+let PUBS={};
+const pubHTML=p=>{PUBS[p.id]=p;const cat=(SP[p.esporte]&&SP[p.esporte].cats||{})[p.categoria];return `<article class="card p-4 space-y-3"><div class="flex items-center gap-3"><button onclick="closeM();perfilSocial(${p.usuario_id})" class="flex items-center gap-3 text-left flex-1 min-w-0">${av(p.atleta,p.atleta_foto,'w-11 h-11')}<div class="min-w-0"><p class="font-semibold text-sm truncate">${esc(p.atleta)}</p><p class="text-[11px] text-gray-400">${tempo(p.criado_em)}</p></div></button>${cat?`<span class="text-[10px] bg-brand/15 text-brand px-3 py-1 rounded-full font-semibold">${cat}</span>`:''}</div>${p.legenda?`<p class="text-sm">${esc(p.legenda)}</p>`:''}${p.tipo==='video'?`<video src="${esc(p.midia)}" controls playsinline preload="metadata" class="w-full rounded-2xl max-h-[28rem] bg-black"></video>`:`<img src="${esc(p.midia)}" alt="Foto da publicação" class="w-full rounded-2xl max-h-[28rem] object-cover">`}<div class="flex justify-between items-center text-gray-400 text-sm"><button onclick="curtirPub(${p.id},this)" class="${p.curtiu?'text-red-500':''}"><i class="${p.curtiu?'fa-solid':'fa-regular'} fa-heart"></i> <span>${p.curtidas}</span></button><div class="flex items-center">${(p.usuario_id===me.id||me.is_admin)?`<button onclick="apagarPub(${p.id})" aria-label="Apagar publicação" class="text-red-400 px-3"><i class="fa-solid fa-trash"></i></button>`:''}<button aria-label="Compartilhar" data-t="${esc(p.atleta)} no RunTeam!" onclick="compartilhar(this.dataset.t)"><i class="fa-solid fa-share-nodes"></i></button></div></div></article>`};
+async function feedSocial(){
+  const [it,ads]=await Promise.all([api(`/publicacoes?esporte=${sp}`+(fc==='seg'?'&seguindo=true':'')),getAds()]);
+  $('#view').innerHTML=`<div class="flex gap-2">${pill(fc!=='seg','Todos',"fc='todos';feedSocial()")}${pill(fc==='seg','Seguindo',"fc='seg';feedSocial()")}</div><button onclick="novaPub()" class="btn w-full py-3 text-sm"><i class="fa-solid fa-camera"></i> Nova publicação</button>`
+  +(it.length?it.map((p,i)=>pubHTML(p)+(i%3===2&&ads.length?adCard(ads[Math.floor(i/3)%ads.length]):'')).join(''):empty(fc==='seg'?'Siga atletas (toque no nome deles) para ver as publicações aqui.':`Nenhuma publicação de ${SP[sp].nome.toLowerCase()} ainda. Seja o primeiro!`))
+  +(ads.length&&it.length<3?adCard(ads[0]):'');contaAds();
+}
+function novaPub(){
+  modal('Nova publicação · '+SP[sp].nome,`<label class="block text-[11px] text-gray-400 mb-1">Categoria</label><select name="categoria" class="${IN}">${Object.entries(SP[sp].cats).map(([k,v])=>`<option value="${k}">${v}</option>`).join('')}</select>`+F('legenda','Legenda (opcional)','maxlength="300" placeholder="Conte como foi..."')+F('midia','Foto ou vídeo curto (até 60 s)','type="file" accept="image/*,video/*" required'),async fd=>{
+    const f=fd.get('midia');if(!f||!f.size)throw new Error('Escolha uma foto ou um vídeo');
+    if(f.type.startsWith('video/')){
+      if(f.size>30*1024*1024)throw new Error('O vídeo deve ter até 30 MB');
+      const d=await duracao(f);if(d&&d>61)throw new Error('O vídeo deve ter no máximo 60 segundos');
+    }else if(f.size>10*1024*1024)throw new Error('A foto deve ter até 10 MB');
+    const b=new FormData();b.append('esporte',sp);b.append('categoria',fd.get('categoria'));if(fd.get('legenda'))b.append('legenda',fd.get('legenda'));b.append('midia',f);
+    toast('Enviando...');await api('/publicacoes',{method:'POST',body:b});toast('Publicado!');go('home');
+  },'Publicar');
+}
+async function curtirPub(id,b){
+  try{const r=await api(`/publicacoes/${id}/curtir`,{method:'POST'}),s=b.querySelector('span');s.textContent=+s.textContent+(r.curtiu?1:-1);b.classList.toggle('text-red-500',r.curtiu);b.querySelector('i').className=(r.curtiu?'fa-solid':'fa-regular')+' fa-heart';if(PUBS[id]){PUBS[id].curtiu=r.curtiu;PUBS[id].curtidas=+s.textContent}}catch(e){toast(e.message)}
+}
+async function apagarPub(id){
+  if(!confirm('Apagar esta publicação? Não dá para desfazer.'))return;
+  try{await api(`/publicacoes/${id}`,{method:'DELETE'});closeM();toast('Publicação apagada');go(cur)}catch(e){toast(e.message)}
+}
+function abrirPub(id){$('#modal').innerHTML=`<div class="w-full max-w-md max-h-full overflow-y-auto">${pubHTML(PUBS[id])}<button onclick="closeM()" class="w-full mt-2 py-2 text-xs text-gray-400">Fechar</button></div>`;$('#modal').classList.remove('hidden')}
+async function perfilSocial(id){
+  id=id||me.id;const [u,ps]=await Promise.all([api('/usuarios/'+id),api(`/publicacoes?esporte=${sp}&usuario_id=${id}&limite=60`)]);
+  ps.forEach(p=>PUBS[p.id]=p);const own=id===me.id,sig=(me.seguindo_ids||[]).includes(id),likes=ps.reduce((a,p)=>a+p.curtidas,0);
+  $('#view').innerHTML=`<section class="card p-5 space-y-5"><div class="flex items-center gap-4">${own?`<label class="relative cursor-pointer" title="Trocar foto de perfil">${av(u.nome,u.foto_perfil,'w-20 h-20 text-2xl')}<span class="absolute -bottom-1 -right-1 w-7 h-7 rounded-full bg-brand flex items-center justify-center text-xs"><i class="fa-solid fa-camera"></i></span><input type="file" accept="image/*" class="hidden" onchange="fotoPerfil(this.files[0])"></label>`:av(u.nome,u.foto_perfil,'w-20 h-20 text-2xl')}<div class="flex-1 min-w-0"><h2 class="text-lg font-bold truncate">${esc(u.nome)}</h2><p class="text-xs text-gray-400"><i class="fa-solid ${SP[sp].ic} text-brand"></i> ${SP[sp].nome} · ${esc(u.cidade)}</p></div>${own?'':`<button onclick="seguir(${id})" class="${sig?'border border-line text-gray-300':'btn'} text-xs px-4 py-2 rounded-xl font-semibold">${sig?'Seguindo':'Seguir'}</button>`}</div><div class="grid grid-cols-3">${st('Publicações',ps.length)}${st('Curtidas',likes)}${st('Seguidores',u.seguidores)}</div></section>`
+  +(ps.length?`<div class="grid grid-cols-3 gap-1.5">${ps.map(p=>`<button onclick="abrirPub(${p.id})" aria-label="Abrir publicação" class="relative aspect-square rounded-2xl overflow-hidden bg-card">${p.tipo==='video'?`<video src="${esc(p.midia)}#t=0.1" preload="metadata" muted playsinline class="w-full h-full object-cover"></video><span class="absolute bottom-1.5 right-1.5 text-[10px] bg-black/60 rounded-full w-6 h-6 flex items-center justify-center"><i class="fa-solid fa-play"></i></span>`:`<img src="${esc(p.midia)}" alt="" class="w-full h-full object-cover">`}</button>`).join('')}</div>`:empty(own?'Você ainda não publicou. Toque no + para começar!':'Nenhuma publicação ainda.'))
+  +(own?`<button onclick="logout()" class="text-xs text-gray-500 hover:text-red-400"><i class="fa-solid fa-right-from-bracket"></i> Sair</button>`:'');
+}
+async function destaques(){
+  const it=await api('/destaques?esporte='+sp),medal=['text-amber-400','text-gray-300','text-orange-500'];
+  $('#view').innerHTML=head('Destaques')+`<p class="text-xs text-gray-400">Atletas mais curtidos ${SP[sp].em}</p>`+(it.length?`<div class="card divide-y divide-line">${it.map((r,i)=>`<button onclick="perfilSocial(${r.usuario_id})" class="p-3 flex items-center gap-3 w-full text-left"><span class="w-7 text-center font-bold">${i<3?`<i class="fa-solid fa-medal text-xl ${medal[i]}"></i>`:i+1}</span>${av(r.nome,r.foto,'w-10 h-10 text-sm')}<span class="flex-1 min-w-0"><span class="block text-sm font-semibold truncate">${esc(r.nome)}</span><span class="block text-[11px] text-gray-400">${r.posts} publicaç${r.posts===1?'ão':'ões'}</span></span><span class="font-bold text-sm"><i class="fa-solid fa-heart text-red-500"></i> ${r.curtidas}</span></button>`).join('')}</div>`:empty('Ainda ninguém publicou. Seja o primeiro!'));
 }
 
 /* ---------- GPS ---------- */
